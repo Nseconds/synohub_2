@@ -362,10 +362,9 @@ export const AddServicePage = ({
             {/* Requested Person */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-zinc-600">
-                Requested Person: <span className="text-red-500">*</span>
+                Requested Person:
               </label>
               <select
-                required
                 value={requestedPerson}
                 onChange={(e) => setRequestedPerson(e.target.value)}
                 className="w-full bg-[#f8fafc] border border-zinc-300 rounded px-3 py-2 text-xs text-zinc-850 focus:outline-none focus:border-sky-500 cursor-pointer"
