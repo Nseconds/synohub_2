@@ -508,18 +508,24 @@ app.post("/api/services", async (req, res) => {
 
     let contactPersonVal = body.contactPerson || body.contactName || null;
     let contactNumberVal = body.contactNumber || body.phone || null;
+    let emailVal = body.email || null;
+    let addressVal = body.address || null;
     let regionVal = body.region || null;
+    let implementationTypeVal = body.implementationType || null;
 
     if (customerId > 0) {
       try {
         const [custRows]: any = await pool.query(
-          "SELECT contact_name, phone, region FROM customers WHERE id = ? LIMIT 1",
+          "SELECT contact_name, phone, email, address, region, implementation_type FROM customers WHERE id = ? LIMIT 1",
           [customerId]
         );
         if (custRows && custRows[0]) {
           if (!contactPersonVal) contactPersonVal = custRows[0].contact_name;
           if (!contactNumberVal) contactNumberVal = custRows[0].phone;
+          if (!emailVal) emailVal = custRows[0].email;
+          if (!addressVal) addressVal = custRows[0].address;
           if (!regionVal) regionVal = custRows[0].region;
+          if (!implementationTypeVal) implementationTypeVal = custRows[0].implementation_type;
         }
       } catch (err) {
         console.error("Failed to query contact details from customers table:", err);
@@ -562,11 +568,11 @@ app.post("/api/services", async (req, res) => {
         finalCustomerName,
         contactPersonVal,
         contactNumberVal,
-        body.email || null,
-        body.address || null,
+        emailVal,
+        addressVal,
         mapLinkVal,
         regionVal,
-        body.implementationType || "LOCATOR",
+        implementationTypeVal || "LOCATOR",
         descVal,
         qtyVal,
         paymentVal,
@@ -585,7 +591,10 @@ app.post("/api/services", async (req, res) => {
       customerUsername: customerUsernameVal || "", 
       contactPerson: contactPersonVal || "",
       contactNumber: contactNumberVal || "",
+      email: emailVal || "",
+      address: addressVal || "",
       region: regionVal || "",
+      implementationType: implementationTypeVal || "LOCATOR",
       ...body 
     });
   } catch (err: any) {
