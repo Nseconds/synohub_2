@@ -177,9 +177,10 @@ export const ChatInterface = ({
       let savedRecord: any = null;
 
       // 2. Parse Structured JSON to create ticket
-      if (rawContent.startsWith("{") && rawContent.endsWith("}")) {
+      const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
         try {
-          const parsedJson = JSON.parse(rawContent);
+          const parsedJson = JSON.parse(jsonMatch[0].trim());
           if (parsedJson.intent === "create_service_ticket") {
             const insertResponse = await fetch("/api/services", {
               method: "POST",
