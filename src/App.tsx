@@ -47,6 +47,34 @@ export default function App() {
   });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [searchedCustomers, setSearchedCustomers] = useState<Customer[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (searchTerm.trim() === "") {
+      setSearchedCustomers([]);
+      return;
+    }
+
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/customers?q=${encodeURIComponent(searchTerm)}`, {
+          headers: {
+            "Authorization": `Bearer ${user.token}`
+          }
+        });
+        if (response.ok) {
+          const fetchedData = await response.json();
+          setSearchedCustomers(fetchedData);
+        }
+      } catch (err) {
+        console.error("Dashboard search query failed:", err);
+      }
+    }, 300);
+
+    return () => clearTimeout(delayDebounce);
+  }, [searchTerm, user]);
+
   const [filterRegion] = useState("All");
   const [filterStatus] = useState("All");
 
@@ -108,9 +136,11 @@ export default function App() {
     return matchesSearch && matchesRegion && matchesStatus;
   });
 
-  const filteredCustomers = (data?.customers || []).filter(cust => 
-    cust && cust.name && ((cust.name || '').toLowerCase()).includes((searchTerm || '').toLowerCase())
-  );
+  const filteredCustomers = searchTerm.trim() !== ""
+    ? searchedCustomers
+    : (data?.customers || []).filter(cust => 
+        cust && cust.name && ((cust.name || '').toLowerCase()).includes((searchTerm || '').toLowerCase())
+      );
 
   const navItems = [
     { id: "overview", label: "Dashboard", icon: LayoutDashboard },

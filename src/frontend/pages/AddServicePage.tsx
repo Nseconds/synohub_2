@@ -28,6 +28,36 @@ export const AddServicePage = ({
   const [search, setSearch] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [localCustomers, setLocalCustomers] = useState<Customer[]>(customers);
+
+  useEffect(() => {
+    setLocalCustomers(customers);
+  }, [customers]);
+
+  useEffect(() => {
+    if (search.trim() === "") {
+      setLocalCustomers(customers);
+      return;
+    }
+
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/customers?q=${encodeURIComponent(search)}`, {
+          headers: {
+            "Authorization": `Bearer ${currentUser?.token || ""}`
+          }
+        });
+        if (response.ok) {
+          const fetchedData = await response.json();
+          setLocalCustomers(fetchedData);
+        }
+      } catch (err) {
+        console.error("Failed to fetch autocomplete customers:", err);
+      }
+    }, 300);
+
+    return () => clearTimeout(delayDebounce);
+  }, [search, customers, currentUser]);
 
   useEffect(() => {
     if (preselectedCustomer) {
@@ -55,7 +85,7 @@ export const AddServicePage = ({
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
   // Filter customers based on search input
-  const filteredCustomers = customers.filter(c => 
+  const filteredCustomers = localCustomers.filter(c => 
     c && c.name && c.name.toLowerCase().includes(search.toLowerCase())
   );
 
