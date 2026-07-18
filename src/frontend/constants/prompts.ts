@@ -62,10 +62,14 @@ customerUsername
 Always leave as null.
 
 contactPerson
-Extract contact name if mentioned. Else null.
+Extract contact name/person (e.g. from "contact: Rahul" or "Rahul" or "contact person: Rahul").
+Example: "contact: Rahul (+971 56 216 5787)" -> "Rahul"
+Else null.
 
 contactNumber
-Extract contact phone number if mentioned. Else null.
+Extract contact phone number (e.g. from "+971..." or "phone: ...").
+Example: "contact: Rahul (+971 56 216 5787)" -> "+971 56 216 5787"
+Else null.
 
 description
 Capture the primary issue or description of the service request.
@@ -78,7 +82,9 @@ Default:
 1
 
 vehiclePlate
-Extract vehicle plate numbers/names if mentioned. Else null.
+Extract vehicle plate numbers/names if mentioned.
+Example: "plate: Sabir ANP 73785" -> "Sabir ANP 73785"
+Else null.
 
 accessories
 Extract accessories if mentioned (e.g. sensors, temperature probe, custom cables). Else null.
