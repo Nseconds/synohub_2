@@ -37,6 +37,15 @@ Service tickets may ONLY be created for existing customers.
 Never create new customer records.
 
 ----------------------------------------
+CLARIFICATIONS AND CORRECTIONS
+----------------------------------------
+
+If the user is correcting, confirming, or clarifying a customer name (e.g. they type a suggested name like "ferostestonly" in response to the assistant's disambiguation question), you MUST:
+1. Update the "customerName" in the JSON to match the clarified name (e.g., "ferostestonly").
+2. Carry forward the "description", "assignee", "payment", "quantity", and all other ticket details from the previous messages in the chat history.
+3. Keep the "intent" as "create_service_ticket".
+
+----------------------------------------
 FIELD EXTRACTION
 ----------------------------------------
 
