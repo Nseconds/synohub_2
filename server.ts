@@ -414,6 +414,52 @@ app.put("/api/leads/:id", async (req, res) => {
 app.post("/api/services", async (req, res) => {
   const body = req.body;
   try {
+    const customerNameVal = (body.customerName || "").trim();
+    if (!customerNameVal) {
+      return res.status(400).json({ error: "Customer name is required" });
+    }
+
+    // Check if customer exists in the DB
+    const [exactMatches]: any = await pool.query(
+      "SELECT id, name FROM customers WHERE name = ? LIMIT 1",
+      [customerNameVal]
+    );
+
+    let customerId = 0;
+    let finalCustomerName = customerNameVal;
+
+    if (exactMatches && exactMatches.length > 0) {
+      customerId = exactMatches[0].id;
+      finalCustomerName = exactMatches[0].name;
+    } else {
+      // Fuzzy word matching
+      const words = customerNameVal
+        .split(/\s+/)
+        .map((w: string) => w.trim())
+        .filter((w: string) => w.length > 2); // only words with length > 2
+
+      let candidates: any[] = [];
+      if (words.length > 0) {
+        const likeClauses = words.map(() => "name LIKE ?").join(" OR ");
+        const likeParams = words.map((w: string) => `%${w}%`);
+        const [fuzzyRows]: any = await pool.query(
+          `SELECT id, name FROM customers WHERE ${likeClauses} LIMIT 5`,
+          likeParams
+        );
+        candidates = fuzzyRows || [];
+      }
+
+      if (candidates.length === 0) {
+        return res.status(400).json({ error: "this user is not exist in db" });
+      } else {
+        return res.status(400).json({
+          error: "disambiguation_required",
+          candidates: candidates.map((c: any) => c.name),
+          typedName: customerNameVal
+        });
+      }
+    }
+
     const assigneeName = body.assignee || body.salesPerson;
     const reqName = body.requestedPerson;
     if (!assigneeName && !reqName) {
@@ -445,7 +491,7 @@ app.post("/api/services", async (req, res) => {
     try {
       const [locRows]: any = await pool.query(
         "SELECT customer_expiry_date, locator_plan FROM customers_locator WHERE customer_name = ? LIMIT 1",
-        [body.customerName]
+        [finalCustomerName]
       );
       if (locRows && locRows[0]) {
         customerExpDate = locRows[0].customer_expiry_date;
@@ -482,8 +528,8 @@ app.post("/api/services", async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         nextId,
-        body.customerId || 0,
-        body.customerName,
+        customerId,
+        finalCustomerName,
         body.contactName || null,
         body.phone || null,
         body.email || null,

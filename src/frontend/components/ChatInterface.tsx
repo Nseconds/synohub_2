@@ -203,6 +203,16 @@ export const ChatInterface = ({
 
             if (!insertResponse.ok) {
               const insertErr = await insertResponse.json();
+              if (insertErr.error === "disambiguation_required" && Array.isArray(insertErr.candidates)) {
+                const candidates = insertErr.candidates;
+                let clarifyMsg = "";
+                if (candidates.length === 1) {
+                  clarifyMsg = `Customer "${insertErr.typedName}" was not found. Please clarify, is that the customer you are asking for?\n- ${candidates[0]}`;
+                } else {
+                  clarifyMsg = `Customer "${insertErr.typedName}" was not found. Please clarify, did you mean one of these?\n` + candidates.map(c => `- ${c}`).join("\n");
+                }
+                throw { isFriendlyDisambiguation: true, friendlyMessage: clarifyMsg };
+              }
               throw new Error(insertErr.error || "Failed to log service ticket in database.");
             }
 
@@ -218,7 +228,11 @@ export const ChatInterface = ({
           }
         } catch (jsonErr: any) {
           console.error("JSON parsing/creation failed:", jsonErr);
-          reply = `Parsing error: ${jsonErr.message || "Failed to parse ticket parameters."}`;
+          if (jsonErr.isFriendlyDisambiguation) {
+            reply = jsonErr.friendlyMessage;
+          } else {
+            reply = `Parsing error: ${jsonErr.message || "Failed to parse ticket parameters."}`;
+          }
         }
       }
 
@@ -233,7 +247,7 @@ export const ChatInterface = ({
       }
     } catch (e: any) {
       if (activeChatScopeRef.current !== sendScopeKey) return;
-      const errorMessage = e.message || "I'm experiencing issues. Please try again.";
+      const errorMessage = e.isFriendlyDisambiguation ? e.friendlyMessage : (e.message || "I'm experiencing issues. Please try again.");
       const finalMessages: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: errorMessage, username: messageChannel, timestamp: new Date().toISOString() }];
       setMessages(finalMessages);
       localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMessages));
