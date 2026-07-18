@@ -332,7 +332,7 @@ app.post("/api/leads/new", async (req, res) => {
         customer_service_customer_exp_date,
         locator_plan,
         customer_service_created_date
-      ) VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      ) VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         nextId,
         body.customerName,
@@ -479,7 +479,7 @@ app.post("/api/services", async (req, res) => {
         customer_service_customer_exp_date,
         locator_plan,
         customer_service_created_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         nextId,
         body.customerId || 0,
