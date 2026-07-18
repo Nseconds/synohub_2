@@ -211,6 +211,8 @@ If either is missing, return ONLY:
   ]
 }
 
+If the user only requests to create a ticket (e.g. "log a service ticket for ferostestonly" or "create a ticket for Al Nasser") but does NOT specify what the ticket is about (the actual issue, removal, or installation details), you MUST treat the "description" as missing and return the "missing_information" payload above listing "description" as missing. Do NOT use the request command phrase as the description.
+
 Do NOT guess missing information.
 
 ----------------------------------------
