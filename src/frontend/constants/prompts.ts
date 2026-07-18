@@ -58,26 +58,30 @@ create_service_ticket
 customerName
 Existing customer/company name.
 
-description
-Capture the primary issue AND append every additional detail that does not belong to another field, including:
-- vehicle plate numbers
-- IMEI
-- device serial numbers
-- coordinates
-- Google Maps links
-- telemetry links
-- contact names
-- phone numbers
-- preferred date/time
-- accessories
-- installation notes
-- custom requests
+customerUsername
+Always leave as null.
 
-Nothing provided by the user should be discarded.
+contactPerson
+Extract contact name if mentioned. Else null.
+
+contactNumber
+Extract contact phone number if mentioned. Else null.
+
+description
+Capture the primary issue or description of the service request.
+
+driverNumber
+Extract driver number if mentioned. Else null.
 
 quantity
 Default:
 1
+
+vehiclePlate
+Extract vehicle plate numbers/names if mentioned. Else null.
+
+accessories
+Extract accessories if mentioned (e.g. sensors, temperature probe, custom cables). Else null.
 
 amount
 Extract numeric value.
@@ -164,10 +168,7 @@ FUJ
 If unknown:
 null
 
-----------------------------------------
-IMPLEMENTATION TYPE
-----------------------------------------
-
+implementationType
 Allowed values:
 
 LOCATOR
@@ -180,14 +181,11 @@ OTHER
 If unavailable:
 null
 
-----------------------------------------
-LINK EXTRACTION
-----------------------------------------
+preferredDateTime
+Extract preferred date or time of installation if mentioned. Else null.
 
-Extract any telemetry/map URL if available.
-
-Otherwise:
-null
+link
+Extract any telemetry/map URL if available. Else null.
 
 ----------------------------------------
 VALIDATION
@@ -226,13 +224,20 @@ JSON Schema:
 {
   "intent": "create_service_ticket",
   "customerName": "",
+  "customerUsername": null,
+  "contactPerson": null,
+  "contactNumber": null,
+  "implementationType": null,
   "description": "",
+  "driverNumber": null,
   "quantity": 1,
+  "vehiclePlate": null,
+  "accessories": null,
+  "region": null,
+  "preferredDateTime": null,
+  "requestedPerson": "{{ACTIVE_USER_NAME}}",
   "amount": null,
   "payment": "Not Applicable",
   "assignee": null,
-  "requestedPerson": "{{ACTIVE_USER_NAME}}",
-  "region": null,
-  "implementationType": null,
   "link": null
 }`;

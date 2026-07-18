@@ -218,7 +218,31 @@ export const ChatInterface = ({
             }
 
             const insertResult = await insertResponse.json();
-            reply = `I have successfully parsed your request and logged a new service ticket (TKT-${insertResult.id}) for client ${parsedJson.customerName}!\n\nDetails:\nDescription: ${parsedJson.description}\nQty: ${parsedJson.quantity || 1}\nAssignee: ${parsedJson.assignee || "Unassigned"}\nPayment: ${parsedJson.payment || "Applicable"}`;
+            reply = `SERVICE REQUEST
+━━━━━━━━━━━━━━━━━━━━
+CUSTOMER DETAILS
+━━━━━━━━━━━━━━━━━━━━
+*Customer Name   : ${insertResult.customerName || "N/A"}${insertResult.customerUsername ? ` | ${insertResult.customerUsername}` : ""}
+*Contact Person  : ${insertResult.contactPerson || "N/A"}
+*Contact Number  : ${insertResult.contactNumber || "N/A"}
+
+━━━━━━━━━━━━━━━━━━━━
+SERVICE DETAILS
+━━━━━━━━━━━━━━━━━━━━
+*Implementation Type    : ${insertResult.implementationType || "N/A"}
+*Description      : ${insertResult.description || "N/A"}
+ Driver Number   : ${insertResult.driverNumber || "N/A"}
+*Quantity        : ${insertResult.quantity || 1}
+*Vehicle Plate: ${insertResult.vehiclePlate || "N/A"}
+*accessories : ${insertResult.accessories || "N/A"}
+*Service Location : ${insertResult.region || "N/A"}
+Preferred Date/Time : ${insertResult.preferredDateTime || "N/A"}
+
+*Requested By    : ${insertResult.requestedPerson || currentUser?.name || "admin"}
+━━━━━━━━━━━━━━━━━━━━
+PAYMENT DETAILS
+━━━━━━━━━━━━━━━━━━━━
+Amount          : ${insertResult.amount || "N/A"}`;
             savedRecord = {
               type: "service",
               customerName: parsedJson.customerName

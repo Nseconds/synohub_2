@@ -473,7 +473,7 @@ app.post("/api/services", async (req, res) => {
     const L1_assigned_to = await resolveUserIdByName(resolvedAssignee);
     const reqUserId = await resolveUserIdByName(reqName || "admin");
 
-    const descVal = body.comment || body.description || "";
+    let descVal = body.comment || body.description || "";
     const qtyVal = parseInt(body.newQty || body.quantity || "1") || 1;
 
     const payment = body.paymentOption || body.payment;
@@ -488,18 +488,25 @@ app.post("/api/services", async (req, res) => {
 
     let customerExpDate: any = null;
     let locatorPlanVal: any = null;
+    let customerUsernameVal: any = null;
     try {
       const [locRows]: any = await pool.query(
-        "SELECT customer_expiry_date, locator_plan FROM customers_locator WHERE customer_name = ? LIMIT 1",
+        "SELECT customer_username, customer_expiry_date, locator_plan FROM customers_locator WHERE customer_name = ? LIMIT 1",
         [finalCustomerName]
       );
       if (locRows && locRows[0]) {
+        customerUsernameVal = locRows[0].customer_username;
         customerExpDate = locRows[0].customer_expiry_date;
         locatorPlanVal = locRows[0].locator_plan;
       }
     } catch (err) {
       console.error("Failed to query customer_expiry_date/locator_plan from customers_locator:", err);
     }
+
+    if (body.vehiclePlate) descVal += `\nVehicle Plate: ${body.vehiclePlate}`;
+    if (body.accessories) descVal += `\naccessories: ${body.accessories}`;
+    if (body.driverNumber) descVal += `\nDriver Number: ${body.driverNumber}`;
+    if (body.preferredDateTime) descVal += `\nPreferred Date/Time: ${body.preferredDateTime}`;
 
     await pool.query(
       `INSERT INTO tbl_customer_services_beta (
@@ -530,8 +537,8 @@ app.post("/api/services", async (req, res) => {
         nextId,
         customerId,
         finalCustomerName,
-        body.contactName || null,
-        body.phone || null,
+        body.contactPerson || body.contactName || null,
+        body.contactNumber || body.phone || null,
         body.email || null,
         body.address || null,
         mapLinkVal,
@@ -550,7 +557,7 @@ app.post("/api/services", async (req, res) => {
       ]
     );
 
-    return res.json({ id: nextId, ...body });
+    return res.json({ id: nextId, customerUsername: customerUsernameVal || "", ...body });
   } catch (err: any) {
     console.error("Create service request failed:", err);
     return res.status(500).json({ error: "Failed to create service ticket." });
