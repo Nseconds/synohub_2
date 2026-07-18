@@ -225,9 +225,9 @@ app.get("/api/data", async (req, res) => {
       customerName: r.customer_service_customer_name,
       description: r.customer_service_description || "",
       status: r.customer_service_status === "new" ? "New" :
-              r.customer_service_status === "hold" ? "Hold" :
-              r.customer_service_status === "ongoing" ? "Ongoing" :
-              r.customer_service_status === "completed" ? "Completed" : "Followed up",
+        r.customer_service_status === "hold" ? "Hold" :
+          r.customer_service_status === "ongoing" ? "Ongoing" :
+            r.customer_service_status === "completed" ? "Completed" : "Followed up",
       quantity: r.customer_service_quantity || 1,
       requestedPerson: userIdToNameMap[r.requested_by] || "Unassigned",
       payment: r.customer_service_payment === "applicable" ? "Applicable" : "Not Applicable",
@@ -291,6 +291,22 @@ app.post("/api/leads/new", async (req, res) => {
 
     const payStatus = body.paymentStatus;
     const payStatusVal = payStatus ? (payStatus.toLowerCase().replace(/\s+/g, "") === "paid" ? "paid" : "notpaid") : null;
+    const mapLinkVal = body.mapLink || body.link || null;
+
+    let customerExpDate: any = null;
+    let locatorPlanVal: any = null;
+    try {
+      const [locRows]: any = await pool.query(
+        "SELECT customer_expiry_date, locator_plan FROM customers_locator WHERE customer_name = ? LIMIT 1",
+        [body.customerName]
+      );
+      if (locRows && locRows[0]) {
+        customerExpDate = locRows[0].customer_expiry_date;
+        locatorPlanVal = locRows[0].locator_plan;
+      }
+    } catch (err) {
+      console.error("Failed to query customer_expiry_date/locator_plan from customers_locator:", err);
+    }
 
     await pool.query(
       `INSERT INTO tbl_customer_services_beta (
@@ -301,6 +317,7 @@ app.post("/api/leads/new", async (req, res) => {
         customer_service_customer_phone, 
         customer_service_customer_email, 
         customer_service_customer_address, 
+        customer_service_address_map,
         region, 
         customer_service_customer_type, 
         customer_service_description, 
@@ -312,25 +329,30 @@ app.post("/api/leads/new", async (req, res) => {
         customer_service_L1_assigned_to,
         requested_by,
         customer_service_created_by,
+        customer_service_customer_exp_date,
+        locator_plan,
         customer_service_created_date
-      ) VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      ) VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         nextId,
         body.customerName,
-        body.contactName || "",
-        body.phone || "",
-        body.email || "",
-        body.address || "",
-        body.region || "Dubai",
+        body.contactName || null,
+        body.phone || null,
+        body.email || null,
+        body.address || null,
+        mapLinkVal,
+        body.region || null,
         body.implementationType || "LOCATOR",
         descVal,
         qtyVal,
         paymentVal,
         amountVal,
         payStatusVal,
-        L1_assigned_to,
-        reqUserId,
-        reqUserId
+        L1_assigned_to || 0,
+        reqUserId || 0,
+        reqUserId || 0,
+        customerExpDate,
+        locatorPlanVal
       ]
     );
 
@@ -416,6 +438,22 @@ app.post("/api/services", async (req, res) => {
 
     const payStatus = body.paymentStatus;
     const payStatusVal = payStatus ? (payStatus.toLowerCase().replace(/\s+/g, "") === "paid" ? "paid" : "notpaid") : null;
+    const mapLinkVal = body.mapLink || body.link || null;
+
+    let customerExpDate: any = null;
+    let locatorPlanVal: any = null;
+    try {
+      const [locRows]: any = await pool.query(
+        "SELECT customer_expiry_date, locator_plan FROM customers_locator WHERE customer_name = ? LIMIT 1",
+        [body.customerName]
+      );
+      if (locRows && locRows[0]) {
+        customerExpDate = locRows[0].customer_expiry_date;
+        locatorPlanVal = locRows[0].locator_plan;
+      }
+    } catch (err) {
+      console.error("Failed to query customer_expiry_date/locator_plan from customers_locator:", err);
+    }
 
     await pool.query(
       `INSERT INTO tbl_customer_services_beta (
@@ -426,6 +464,7 @@ app.post("/api/services", async (req, res) => {
         customer_service_customer_phone, 
         customer_service_customer_email, 
         customer_service_customer_address, 
+        customer_service_address_map,
         region, 
         customer_service_customer_type, 
         customer_service_description, 
@@ -437,26 +476,31 @@ app.post("/api/services", async (req, res) => {
         customer_service_L1_assigned_to,
         requested_by,
         customer_service_created_by,
+        customer_service_customer_exp_date,
+        locator_plan,
         customer_service_created_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         nextId,
         body.customerId || 0,
         body.customerName,
-        body.contactName || "",
-        body.phone || "",
-        body.email || "",
-        body.address || "",
-        body.region || "Dubai",
+        body.contactName || null,
+        body.phone || null,
+        body.email || null,
+        body.address || null,
+        mapLinkVal,
+        body.region || null,
         body.implementationType || "LOCATOR",
         descVal,
         qtyVal,
         paymentVal,
         amountVal,
         payStatusVal,
-        L1_assigned_to,
-        reqUserId,
-        reqUserId
+        L1_assigned_to || 0,
+        reqUserId || 0,
+        reqUserId || 0,
+        customerExpDate,
+        locatorPlanVal
       ]
     );
 
@@ -636,6 +680,13 @@ app.post("/api/chat", async (req, res) => {
     console.error("Chat message processing failed:", err);
     return res.status(550).json({ error: "Failed to execute chat transaction." });
   }
+});
+
+app.get("/api/config", (req, res) => {
+  return res.json({
+    apiKey: process.env.GROQ_API_KEY || "",
+    model: process.env.GROQ_MODEL || "llama-3.1-8b-instant"
+  });
 });
 
 app.listen(PORT, () => {

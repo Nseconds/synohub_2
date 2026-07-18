@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchChatHistory, sendChatMessage } from "../api/chatApi";
 import { REQUESTED_PEOPLE } from "../constants/options";
 import { ChatPage, type CompareProvider, type SafeQueryAiMode } from "../pages/ChatPage";
 import type { Message } from "../types";
+import { SYSTEM_PROMPT } from "../constants/prompts";
 
 interface CurrentUser {
   name: string;
@@ -32,16 +32,16 @@ export const ChatInterface = ({
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeChatScopeRef = useRef("");
-  const historyRequestRef = useRef(0);
   const [selectedChatTarget, setSelectedChatTarget] = useState("admin");
   const [aiMode, setAiMode] = useState<SafeQueryAiMode>(() => {
     const saved = localStorage.getItem("synohub-ai-mode");
-    return (saved === "gemini" || saved === "groq") ? saved : "gemini";
+    return saved === "groq" ? saved : "groq";
   });
-  const compareProviders: CompareProvider[] = ["gemini", "groq"];
+  const compareProviders: CompareProvider[] = ["groq"];
   const isAdminViewingOtherChat = currentUser?.role === "admin" && selectedChatTarget !== "admin" && !selectedChatTarget.startsWith("user:");
   const chatScopeKey = `${userKey || ""}|${currentUser?.role || ""}|${selectedChatTarget}|${aiMode}`;
   const [usersList, setUsersList] = useState<{ id: number; name: string; username: string }[]>([]);
+  const [groqConfig, setGroqConfig] = useState<{ apiKey: string; model: string }>({ apiKey: "", model: "llama-3.1-8b-instant" });
 
   const getBaseChatChannel = (target: string) => {
     if (target.startsWith("user:")) return target;
@@ -54,12 +54,7 @@ export const ChatInterface = ({
     return `${getBaseChatChannel(target)}|ai:${mode}`;
   };
 
-  const filterModeMessages = (items: Message[], mode: SafeQueryAiMode, target: string) => {
-    const expectedChannel = getModeChatChannel(mode, target);
-    return items.filter(item => !item.username || item.username === expectedChannel);
-  };
-
-  const toggleCompareProvider = (_provider: CompareProvider) => {};
+  const toggleCompareProvider = (_provider: CompareProvider) => { };
 
   useEffect(() => {
     if (!currentUser) return;
@@ -84,10 +79,42 @@ export const ChatInterface = ({
   }, [currentUser]);
 
   useEffect(() => {
+    if (!currentUser) return;
+    fetch("/api/config", {
+      headers: {
+        Authorization: `Bearer ${currentUser.token}`
+      }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.apiKey) {
+          setGroqConfig(data);
+        }
+      })
+      .catch(err => console.error("Failed to load Groq configuration:", err));
+  }, [currentUser]);
+
+  // Load history from localStorage
+  useEffect(() => {
     activeChatScopeRef.current = chatScopeKey;
-    setMessages([]);
-    fetchHistory(chatScopeKey, aiMode, selectedChatTarget, currentUser?.role);
-  }, [chatScopeKey, aiMode, selectedChatTarget, currentUser?.role]);
+    const localHist = localStorage.getItem(`synohub-chat-hist-${chatScopeKey}`);
+    if (localHist) {
+      try {
+        setMessages(JSON.parse(localHist));
+      } catch (e) {
+        setMessages([]);
+      }
+    } else {
+      setMessages([
+        {
+          role: "assistant" as const,
+          content: `Greetings! I am the Synosys Officer, your neural fleet intelligence assistant. Ask me to log a new service ticket or show statistics.`,
+          username: getModeChatChannel(aiMode, selectedChatTarget),
+          timestamp: new Date().toISOString()
+        }
+      ]);
+    }
+  }, [chatScopeKey]);
 
   useEffect(() => {
     if (forcedInput) {
@@ -102,54 +129,111 @@ export const ChatInterface = ({
     }
   }, [messages]);
 
-  const fetchHistory = async (
-    scopeKey: string,
-    mode: SafeQueryAiMode,
-    target: string,
-    role?: string,
-  ) => {
-    const requestId = historyRequestRef.current + 1;
-    historyRequestRef.current = requestId;
-    try {
-      const history = await fetchChatHistory({
-        ...(role === "admin" ? { target } : {}),
-        aiMode: mode,
-        cacheBust: Date.now(),
-      });
-      if (historyRequestRef.current !== requestId || activeChatScopeRef.current !== scopeKey) return;
-      setMessages(filterModeMessages(Array.isArray(history) ? history : [], mode, target));
-    } catch (e) {
-      console.error("Failed to fetch chat history", e);
-    }
-  };
-
   const handleSend = async () => {
     if (isAdminViewingOtherChat) return;
     if (!input.trim() || loading) return;
     const userMsg = input;
     const messageChannel = getModeChatChannel(aiMode, selectedChatTarget);
     setInput("");
-    setMessages(prev => [...prev, { role: "user", content: userMsg, username: messageChannel }]);
+    
+    const updatedUserMessages: Message[] = [...messages, { role: "user" as const, content: userMsg, username: messageChannel, timestamp: new Date().toISOString() }];
+    setMessages(updatedUserMessages);
+    localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(updatedUserMessages));
+    
     setLoading(true);
     const sendScopeKey = chatScopeKey;
 
     try {
-      const payload: any = { message: userMsg, aiMode };
-      if (currentUser?.role === "admin") {
-        payload.selectedChatTarget = selectedChatTarget;
+      // 1. Call Groq completions API directly
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${groqConfig.apiKey || "dummy_key"}`
+        },
+        body: JSON.stringify({
+          model: groqConfig.model,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            ...updatedUserMessages.slice(-8).map(m => ({
+              role: m.role === "user" ? "user" : "assistant",
+              content: m.content
+            })),
+            { role: "user", content: userMsg }
+          ],
+          temperature: 0.2,
+          max_tokens: 1024
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Groq API returned status ${response.status}: ${errText}`);
       }
-      const res: any = await sendChatMessage(payload);
-      if (activeChatScopeRef.current !== sendScopeKey) return;
-      setMessages(prev => [...prev, { role: "assistant", content: res.answer || res.reply, username: messageChannel }]);
-      if (res.savedRecord) {
-        if (onRecordSaved) {
-          onRecordSaved(res.savedRecord);
+
+      const data = await response.json();
+      const rawContent = (data?.choices?.[0]?.message?.content || "").trim();
+      let reply = rawContent;
+      let savedRecord: any = null;
+
+      // 2. Parse Structured JSON to create ticket
+      if (rawContent.startsWith("{") && rawContent.endsWith("}")) {
+        try {
+          const parsedJson = JSON.parse(rawContent);
+          if (parsedJson.intent === "create_service_ticket") {
+            const insertResponse = await fetch("/api/services", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${currentUser?.token || ""}`
+              },
+              body: JSON.stringify({
+                customerName: parsedJson.customerName,
+                description: parsedJson.description,
+                quantity: parsedJson.quantity || 1,
+                amount: parsedJson.amount || null,
+                payment: parsedJson.payment || "Applicable",
+                assignee: parsedJson.assignee || null,
+                requestedPerson: parsedJson.requestedPerson || currentUser?.name || "admin",
+                region: parsedJson.region || "Dubai",
+                implementationType: parsedJson.implementationType || "LOCATOR",
+                link: parsedJson.link || null
+              })
+            });
+
+            if (!insertResponse.ok) {
+              const insertErr = await insertResponse.json();
+              throw new Error(insertErr.error || "Failed to log service ticket in database.");
+            }
+
+            const insertResult = await insertResponse.json();
+            reply = `I have successfully parsed your request and logged a new service ticket (TKT-${insertResult.id}) for client **${parsedJson.customerName}**!\n\n**Details:**\n• **Description:** ${parsedJson.description}\n• **Qty:** ${parsedJson.quantity || 1}\n• **Assignee:** ${parsedJson.assignee || "Unassigned"}\n• **Payment:** ${parsedJson.payment || "Applicable"}`;
+            savedRecord = {
+              type: "service",
+              customerName: parsedJson.customerName
+            };
+          }
+        } catch (jsonErr: any) {
+          console.error("JSON parsing/creation failed:", jsonErr);
+          reply = `Parsing error: ${jsonErr.message || "Failed to parse ticket parameters."}`;
         }
       }
-    } catch (e) {
+
       if (activeChatScopeRef.current !== sendScopeKey) return;
-      const errorMessage = (e as any)?.response?.data?.error || (e as Error).message || "I'm experiencing high traffic. Please try again in 30s.";
-      setMessages(prev => [...prev, { role: "assistant", content: errorMessage, username: messageChannel }]);
+
+      const finalMessages: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: reply, username: messageChannel, timestamp: new Date().toISOString() }];
+      setMessages(finalMessages);
+      localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMessages));
+
+      if (savedRecord && onRecordSaved) {
+        onRecordSaved(savedRecord);
+      }
+    } catch (e: any) {
+      if (activeChatScopeRef.current !== sendScopeKey) return;
+      const errorMessage = e.message || "I'm experiencing issues. Please try again.";
+      const finalMessages: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: errorMessage, username: messageChannel, timestamp: new Date().toISOString() }];
+      setMessages(finalMessages);
+      localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMessages));
     } finally {
       setLoading(false);
     }

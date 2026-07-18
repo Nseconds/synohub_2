@@ -2,7 +2,7 @@
 
 A clean, modern, and high-performance React + TypeScript SPA client for the **SynoHub Fleet Operations Portal** (Dubai Operations). 
 
-This portal has been replicated and optimized to run **completely client-side**. It requires **zero backend servers or database configurations** to run. All database operations (adding tickets, tracking leads, editing customer information, and simulated AI Chat) are handled in the browser via an interactive local-storage database mock layer.
+This portal connects to an Express API backend server (`server.ts`) which manages database operations (adding tickets, tracking leads, editing customer information, and simulated AI Chat) directly on a remote MySQL database configured via environment variables.
 
 ---
 
@@ -63,17 +63,19 @@ synohub_2/
 
 ---
 
-## ⚡ How the Client-Side API Mock Layer Works
+## ⚡ How the Database & API Integration Works
 
-To avoid complex backend configurations and database setups, the frontend works dynamically out-of-the-box using two features:
+The frontend works dynamically by proxying API requests to the Express backend server:
 
-1. **Local-Storage Mock DB (`src/frontend/api/apiClient.ts`)**:
-   - On the first load, the app seeds `localStorage` with a mock dataset containing realistic Dubai and UAE-based fleet management clients (e.g., *Emirates Transport*, *Al Futtaim Logistics*), lead logs, and service tickets.
-   - Any requests to save leads, modify tickets, or perform customer searches write directly to `localStorage.getItem("synohub_mock_db")`, making the app fully interactive and persistent.
+1. **Express Backend API (`server.ts`)**:
+   - Runs on port `3000` (or the `PORT` specified in `.env`).
+   - Connects to the MySQL database configured in `.env`.
+   - Seeded/populated with realistic Dubai and UAE-based fleet management clients (e.g., *Emirates Transport*, *Al Futtaim Logistics*), lead logs, and service tickets.
+   - Contains handlers for portal authentication, client/lead retrieval, updates, and chat history.
 
-2. **Global Fetch Interceptor (`src/main.tsx`)**:
-   - Any component making direct `fetch()` calls (like the chat user lists query `/api/users`) is automatically intercepted at the window level.
-   - The interceptor routes the request to our mock API client and returns a standard HTTP-like `Response` object. This prevents any network leak errors or connection failures.
+2. **Frontend Development Server (`vite.config.ts` Proxy)**:
+   - Vite is configured to proxy all `/api` requests to the Express server running at `http://localhost:3000` (or your configured port).
+   - This ensures smooth local development without needing cross-origin configuration (CORS) issues in the browser.
 
 ---
 
@@ -82,25 +84,43 @@ To avoid complex backend configurations and database setups, the frontend works 
 ### 1. Requirements
 Ensure you have **Node.js** (v18 or higher) and **npm** installed on your system.
 
-### 2. Installing Dependencies
-Install the required React, Tailwind, and Vite packages:
+### 2. Configure Environment Variables
+Ensure you have a `.env` file in the root directory with the database credentials:
+```env
+PORT=3000
+DB_HOST=<your_db_host>
+DB_PORT=3306
+DB_USER=<your_db_user>
+DB_PASSWORD=<your_db_password>
+DB_NAME=<your_db_name>
+```
+
+### 3. Installing Dependencies
+Install the required packages:
 ```bash
 npm install
 ```
 
-### 3. Running the Development Server
-Launch the local Vite server:
-```bash
-npm run dev
-```
-Once the dev server starts, open the local URL (usually `http://localhost:5173`) in your browser.
+### 4. Running the Project
+To run the project, you must start **both** the backend Express server and the Vite frontend dev server in separate terminal windows:
 
-### 4. Compiling the Production Bundle
+* **Start the Backend API Server:**
+  ```bash
+  npm run server
+  ```
+* **Start the Frontend Dev Server:**
+  ```bash
+  npm run dev
+  ```
+
+Once both servers are running, open the local URL (usually `http://localhost:5173`) in your browser.
+
+### 5. Compiling the Production Bundle
 To bundle the frontend into clean, static HTML/CSS/JS files:
 ```bash
 npm run build
 ```
-The optimized bundle will be compiled into the `dist/` directory, which can be deployed to any static host (such as Vercel, Netlify, or AWS S3).
+The optimized bundle will be compiled into the `dist/` directory.
 
 ---
 
@@ -116,15 +136,4 @@ The portal is configured to restrict access to only the authorized team accounts
   * **Usernames**: `Shams`, `athul`, `Rasick`, `Shamnad`, `Naseeb`, `Faizal`, `Nisam`, `musthafa`, `vaishakhtech`, `Ajmal`, `Vishal`, `Nishad`, `Deepak`, `umar`, `Celine`, `Rayn`, `Ivy`, `amrutha`, `Midhun`, `shyamjith`, `Sreemol`, `staff`, `Musthafa`, `Falul`, `Sanjith`, `Harshad`, `Moinudeen`, `Shameem`, `ajmal`, `nixon`, `umartech`, `anshad`, `Saad`, `aamil`, `feroz`
   * **Password**: `staff123`
 
----
 
-## 🛠️ Transitioning to a Real Backend API
-
-When you are ready to scale and connect this frontend to a real API, the process is simple:
-
-1. **Remove the Fetch Interceptor**:
-   - Delete the `window.fetch` interceptor block at the top of [src/main.tsx](file:///var/files/feros/synohub_2/src/main.tsx).
-2. **Restore Real HTTP client**:
-   - Revert [src/frontend/api/apiClient.ts](file:///var/files/feros/synohub_2/src/frontend/api/apiClient.ts) to perform standard network requests using `window.fetch` (pointing to your server base URL).
-3. **Set Environment Variables**:
-   - Add your API gateway host to your environment config.

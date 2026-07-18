@@ -67,7 +67,7 @@ export function DashboardPage({
             </div>
           ) : (
             (() => {
-              const sorted = [...regs].reverse();
+              const sorted = regs;
               const visible = showAllFeed ? sorted : sorted.slice(0, 10);
               return (
                 <>

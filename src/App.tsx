@@ -222,6 +222,7 @@ export default function App() {
                   requestedPeopleList={requestedPeopleList}
                   preselectedCustomer={preselectedCustomer}
                   onClearPreselected={() => setPreselectedCustomer(null)}
+                  currentUser={user}
                   onSubmit={async (payload) => {
                     try {
                       await createServiceRequest(payload);

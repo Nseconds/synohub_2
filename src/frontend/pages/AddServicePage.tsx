@@ -12,6 +12,7 @@ interface AddServicePageProps {
   onClearPreselected?: () => void;
   onSubmit: (payload: any) => Promise<void>;
   onClose: () => void;
+  currentUser?: { name: string; role: string; token: string } | null;
 }
 
 export const AddServicePage = ({
@@ -22,6 +23,7 @@ export const AddServicePage = ({
   onClearPreselected,
   onSubmit,
   onClose,
+  currentUser,
 }: AddServicePageProps) => {
   const [search, setSearch] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -39,7 +41,7 @@ export const AddServicePage = ({
   const [status, setStatus] = useState("New");
   const [quantity, setQuantity] = useState<number>(1);
   const [assignee, setAssignee] = useState("Select");
-  const [requestedPerson, setRequestedPerson] = useState("");
+  const [requestedPerson, setRequestedPerson] = useState(currentUser?.name || "");
   const [payment, setPayment] = useState("Applicable");
   const [invoiceStatus, setInvoiceStatus] = useState("Not Invoiced");
   const [amount, setAmount] = useState("");
@@ -273,7 +275,7 @@ export const AddServicePage = ({
                   className="grid grid-cols-1 md:grid-cols-2 gap-4"
                 >
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-600">Note / Address Details:</label>
+                    <label className="text-xs font-medium text-zinc-600">Note:</label>
                     <input
                       type="text"
                       value={note}
@@ -282,7 +284,7 @@ export const AddServicePage = ({
                     />
                   </div>
                   <div className="space-y-1 relative">
-                    <label className="text-xs font-medium text-zinc-600">Map / Telemetry Link:</label>
+                    <label className="text-xs font-medium text-zinc-600">Link:</label>
                     <div className="flex gap-2">
                       <input
                         type="text"
@@ -370,6 +372,9 @@ export const AddServicePage = ({
                 className="w-full bg-[#f8fafc] border border-zinc-300 rounded px-3 py-2 text-xs text-zinc-850 focus:outline-none focus:border-sky-500 cursor-pointer"
               >
                 <option value="">Select requested person</option>
+                {currentUser?.name && !requestedPeopleList.includes(currentUser.name) && (
+                  <option value={currentUser.name}>{currentUser.name}</option>
+                )}
                 {requestedPeopleList.map((rp) => (
                   <option key={rp} value={rp}>
                     {rp}
