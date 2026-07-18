@@ -217,7 +217,7 @@ export const ChatInterface = ({
             }
 
             const insertResult = await insertResponse.json();
-            reply = `I have successfully parsed your request and logged a new service ticket (TKT-${insertResult.id}) for client **${parsedJson.customerName}**!\n\n**Details:**\n• **Description:** ${parsedJson.description}\n• **Qty:** ${parsedJson.quantity || 1}\n• **Assignee:** ${parsedJson.assignee || "Unassigned"}\n• **Payment:** ${parsedJson.payment || "Applicable"}`;
+            reply = `I have successfully parsed your request and logged a new service ticket (TKT-${insertResult.id}) for client ${parsedJson.customerName}!\n\nDetails:\nDescription: ${parsedJson.description}\nQty: ${parsedJson.quantity || 1}\nAssignee: ${parsedJson.assignee || "Unassigned"}\nPayment: ${parsedJson.payment || "Applicable"}`;
             savedRecord = {
               type: "service",
               customerName: parsedJson.customerName
