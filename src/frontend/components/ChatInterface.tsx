@@ -154,7 +154,7 @@ export const ChatInterface = ({
         body: JSON.stringify({
           model: groqConfig.model,
           messages: [
-            { role: "system", content: SYSTEM_PROMPT },
+            { role: "system", content: SYSTEM_PROMPT.replace(/\{\{ACTIVE_USER_NAME\}\}/g, currentUser?.name || "admin") },
             ...updatedUserMessages.slice(-8).map(m => ({
               role: m.role === "user" ? "user" : "assistant",
               content: m.content
@@ -212,6 +212,9 @@ export const ChatInterface = ({
               type: "service",
               customerName: parsedJson.customerName
             };
+          } else if (parsedJson.intent === "missing_information") {
+            const missing = Array.isArray(parsedJson.missingFields) ? parsedJson.missingFields.join(", ") : "customerName or description";
+            reply = `I need some more information to create the ticket. Please specify: **${missing}**.`;
           }
         } catch (jsonErr: any) {
           console.error("JSON parsing/creation failed:", jsonErr);
