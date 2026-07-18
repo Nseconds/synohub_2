@@ -451,6 +451,9 @@ app.post("/api/services", async (req, res) => {
 
       if (candidates.length === 0) {
         return res.status(400).json({ error: "this user is not exist in db" });
+      } else if (body.confirmFirstCandidate && candidates.length > 0) {
+        customerId = candidates[0].id;
+        finalCustomerName = candidates[0].name;
       } else {
         return res.status(400).json({
           error: "disambiguation_required",
@@ -503,6 +506,26 @@ app.post("/api/services", async (req, res) => {
       console.error("Failed to query customer_expiry_date/locator_plan from customers_locator:", err);
     }
 
+    let contactPersonVal = body.contactPerson || body.contactName || null;
+    let contactNumberVal = body.contactNumber || body.phone || null;
+    let regionVal = body.region || null;
+
+    if (customerId > 0) {
+      try {
+        const [custRows]: any = await pool.query(
+          "SELECT contact_name, phone, region FROM customers WHERE id = ? LIMIT 1",
+          [customerId]
+        );
+        if (custRows && custRows[0]) {
+          if (!contactPersonVal) contactPersonVal = custRows[0].contact_name;
+          if (!contactNumberVal) contactNumberVal = custRows[0].phone;
+          if (!regionVal) regionVal = custRows[0].region;
+        }
+      } catch (err) {
+        console.error("Failed to query contact details from customers table:", err);
+      }
+    }
+
     if (body.vehiclePlate) descVal += `\nVehicle Plate: ${body.vehiclePlate}`;
     if (body.accessories) descVal += `\naccessories: ${body.accessories}`;
     if (body.driverNumber) descVal += `\nDriver Number: ${body.driverNumber}`;
@@ -537,12 +560,12 @@ app.post("/api/services", async (req, res) => {
         nextId,
         customerId,
         finalCustomerName,
-        body.contactPerson || body.contactName || null,
-        body.contactNumber || body.phone || null,
+        contactPersonVal,
+        contactNumberVal,
         body.email || null,
         body.address || null,
         mapLinkVal,
-        body.region || null,
+        regionVal,
         body.implementationType || "LOCATOR",
         descVal,
         qtyVal,
@@ -557,7 +580,14 @@ app.post("/api/services", async (req, res) => {
       ]
     );
 
-    return res.json({ id: nextId, customerUsername: customerUsernameVal || "", ...body });
+    return res.json({ 
+      id: nextId, 
+      customerUsername: customerUsernameVal || "", 
+      contactPerson: contactPersonVal || "",
+      contactNumber: contactNumberVal || "",
+      region: regionVal || "",
+      ...body 
+    });
   } catch (err: any) {
     console.error("Create service request failed:", err);
     return res.status(500).json({ error: "Failed to create service ticket." });

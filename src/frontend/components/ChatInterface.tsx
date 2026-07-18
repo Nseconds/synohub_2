@@ -182,7 +182,10 @@ export const ChatInterface = ({
         try {
           const parsedJson = JSON.parse(jsonMatch[0].trim());
           if (parsedJson.intent === "create_service_ticket") {
-            const insertResponse = await fetch("/api/services", {
+             const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
+             const isDisambiguationActive = !!(lastAssistantMessage && lastAssistantMessage.content.includes("Please clarify"));
+
+             const insertResponse = await fetch("/api/services", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -198,7 +201,14 @@ export const ChatInterface = ({
                 requestedPerson: parsedJson.requestedPerson || currentUser?.name || "admin",
                 region: parsedJson.region || "Dubai",
                 implementationType: parsedJson.implementationType || "LOCATOR",
-                link: parsedJson.link || null
+                link: parsedJson.link || null,
+                contactPerson: parsedJson.contactPerson || null,
+                contactNumber: parsedJson.contactNumber || null,
+                vehiclePlate: parsedJson.vehiclePlate || null,
+                accessories: parsedJson.accessories || null,
+                driverNumber: parsedJson.driverNumber || null,
+                preferredDateTime: parsedJson.preferredDateTime || null,
+                confirmFirstCandidate: isDisambiguationActive
               })
             });
 
@@ -218,31 +228,35 @@ export const ChatInterface = ({
             }
 
             const insertResult = await insertResponse.json();
-            reply = `SERVICE REQUEST
+            reply = `🔹SERVICE REQUEST
+
 ━━━━━━━━━━━━━━━━━━━━
 CUSTOMER DETAILS
 ━━━━━━━━━━━━━━━━━━━━
 *Customer Name   : ${insertResult.customerName || "N/A"}${insertResult.customerUsername ? ` | ${insertResult.customerUsername}` : ""}
 *Contact Person  : ${insertResult.contactPerson || "N/A"}
 *Contact Number  : ${insertResult.contactNumber || "N/A"}
+*Driver: ${insertResult.driverNumber || "N/A"}
 
 ━━━━━━━━━━━━━━━━━━━━
 SERVICE DETAILS
 ━━━━━━━━━━━━━━━━━━━━
-*Implementation Type    : ${insertResult.implementationType || "N/A"}
-*Description      : ${insertResult.description || "N/A"}
- Driver Number   : ${insertResult.driverNumber || "N/A"}
-*Quantity        : ${insertResult.quantity || 1}
-*Vehicle Plate: ${insertResult.vehiclePlate || "N/A"}
-*accessories : ${insertResult.accessories || "N/A"}
-*Service Location : ${insertResult.region || "N/A"}
-Preferred Date/Time : ${insertResult.preferredDateTime || "N/A"}
+*Implementation Type     : ${insertResult.implementationType || "N/A"}
+*Device Quantity: ${insertResult.quantity || 1}
+*Vehicle Plate : 
 
+${insertResult.vehiclePlate || "N/A"}
+
+*Installation Location : ${insertResult.region || "N/A"}
+*Description : ${insertResult.description || "N/A"}
+*accessories : ${insertResult.accessories || "N/A"}
+*Sales person : ${insertResult.assignee || ""}
 *Requested By    : ${insertResult.requestedPerson || currentUser?.name || "admin"}
+
 ━━━━━━━━━━━━━━━━━━━━
 PAYMENT DETAILS
 ━━━━━━━━━━━━━━━━━━━━
-Amount          : ${insertResult.amount || "N/A"}`;
+Amount          : ${insertResult.amount || ""}`;
             savedRecord = {
               type: "service",
               customerName: parsedJson.customerName
