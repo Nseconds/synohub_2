@@ -587,6 +587,7 @@ app.post("/api/services", async (req, res) => {
     );
 
     return res.json({ 
+      ...body,
       id: nextId, 
       customerUsername: customerUsernameVal || "", 
       contactPerson: contactPersonVal || "",
@@ -594,8 +595,7 @@ app.post("/api/services", async (req, res) => {
       email: emailVal || "",
       address: addressVal || "",
       region: regionVal || "",
-      implementationType: implementationTypeVal || "LOCATOR",
-      ...body 
+      implementationType: implementationTypeVal || "LOCATOR"
     });
   } catch (err: any) {
     console.error("Create service request failed:", err);

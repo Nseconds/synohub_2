@@ -8,6 +8,7 @@ export interface ChatMessage {
   content: string;
   timestamp?: string;
   username?: string;
+  model?: string;
 }
 
 export type SafeQueryAiMode = "groq";
@@ -160,6 +161,11 @@ export const ChatPage = ({
             </div>
             <span className="text-[9px] text-zinc-400 uppercase tracking-tight px-1 font-bold">
               {m.role === "user" ? "You" : "Synosys Officer"}
+              {m.role === "assistant" && m.model && (
+                <span className="ml-1 text-[#00ADC6] font-bold lowercase tracking-normal">
+                  ({m.model})
+                </span>
+              )}
             </span>
           </motion.div>
         ))}

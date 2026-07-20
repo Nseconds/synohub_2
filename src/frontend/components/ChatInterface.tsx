@@ -108,7 +108,7 @@ export const ChatInterface = ({
       setMessages([
         {
           role: "assistant" as const,
-          content: `Greetings! I am the Synosys Officer, your neural fleet intelligence assistant. Ask me to log a new service ticket or show statistics.`,
+          content: `Greetings! I am SynoAI Officer, your fleet intelligence assistant. Ask me to log a new service ticket.`,
           username: getModeChatChannel(aiMode, selectedChatTarget),
           timestamp: new Date().toISOString()
         }
@@ -142,37 +142,79 @@ export const ChatInterface = ({
     
     setLoading(true);
     const sendScopeKey = chatScopeKey;
+    let modelUsed = groqConfig.model || "llama-3.1-8b-instant";
 
     try {
-      // 1. Call Groq completions API directly
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${groqConfig.apiKey || "dummy_key"}`
-        },
-        body: JSON.stringify({
-          model: groqConfig.model,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT.replace(/\{\{ACTIVE_USER_NAME\}\}/g, currentUser?.name || "admin") },
-            ...updatedUserMessages.slice(-8).map(m => ({
-              role: m.role === "user" ? "user" : "assistant",
-              content: m.content
-            })),
-            { role: "user", content: userMsg }
-          ],
-          temperature: 0.2,
-          max_tokens: 1024
-        })
-      });
+      // 1. Call Groq completions API directly (with fallback models if rate/token limit is hit)
+      const primaryModel = groqConfig.model || "llama-3.1-8b-instant";
+      const modelsToTry = Array.from(new Set([
+        primaryModel,
+        primaryModel === "llama-3.1-8b-instant" ? "llama-3.3-70b-versatile" : "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768"
+      ]));
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Groq API returned status ${response.status}: ${errText}`);
+      let response: Response | null = null;
+      let lastError: Error | null = null;
+      let rawContent = "";
+
+      for (const model of modelsToTry) {
+        try {
+          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${groqConfig.apiKey || "dummy_key"}`
+            },
+            body: JSON.stringify({
+              model: model,
+              messages: [
+                { role: "system", content: SYSTEM_PROMPT.replace(/\{\{ACTIVE_USER_NAME\}\}/g, currentUser?.name || "admin") },
+                ...updatedUserMessages.slice(-8).map(m => ({
+                  role: m.role === "user" ? "user" : "assistant",
+                  content: m.content
+                })),
+                { role: "user", content: userMsg }
+              ],
+              temperature: 0.2,
+              max_tokens: 1024
+            })
+          });
+
+          if (res.ok) {
+            response = res;
+            lastError = null;
+            modelUsed = model;
+            break;
+          }
+
+          const errText = await res.text();
+          const errLower = errText.toLowerCase();
+          const isRateOrTokenLimit = res.status === 429 || errLower.includes("rate_limit") || errLower.includes("token limit") || errLower.includes("tokens per minute");
+          
+          if (isRateOrTokenLimit) {
+            console.warn(`Model ${model} hit rate/token limit. Trying next model...`);
+            lastError = new Error(`Groq API returned status ${res.status}: ${errText}`);
+            continue;
+          } else {
+            throw new Error(`Groq API returned status ${res.status}: ${errText}`);
+          }
+        } catch (err: any) {
+          lastError = err;
+          const errMsgLower = (err.message || "").toLowerCase();
+          const isRateOrTokenLimitErr = errMsgLower.includes("429") || errMsgLower.includes("rate_limit") || errMsgLower.includes("token limit") || errMsgLower.includes("tokens per minute");
+          if (isRateOrTokenLimitErr) {
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      if (lastError || !response) {
+        throw lastError || new Error("Failed to complete request with any model.");
       }
 
       const data = await response.json();
-      const rawContent = (data?.choices?.[0]?.message?.content || "").trim();
+      rawContent = (data?.choices?.[0]?.message?.content || "").trim();
       let reply = rawContent;
       let savedRecord: any = null;
 
@@ -277,7 +319,7 @@ Amount          : ${insertResult.amount || ""}`;
 
       if (activeChatScopeRef.current !== sendScopeKey) return;
 
-      const finalMessages: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: reply, username: messageChannel, timestamp: new Date().toISOString() }];
+      const finalMessages: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: reply, username: messageChannel, timestamp: new Date().toISOString(), model: modelUsed }];
       setMessages(finalMessages);
       localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMessages));
 
@@ -287,7 +329,7 @@ Amount          : ${insertResult.amount || ""}`;
     } catch (e: any) {
       if (activeChatScopeRef.current !== sendScopeKey) return;
       const errorMessage = e.isFriendlyDisambiguation ? e.friendlyMessage : (e.message || "I'm experiencing issues. Please try again.");
-      const finalMessages: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: errorMessage, username: messageChannel, timestamp: new Date().toISOString() }];
+      const finalMessages: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: errorMessage, username: messageChannel, timestamp: new Date().toISOString(), model: modelUsed }];
       setMessages(finalMessages);
       localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMessages));
     } finally {
