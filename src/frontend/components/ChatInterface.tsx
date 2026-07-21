@@ -286,14 +286,26 @@ export const ChatInterface = ({
 
       const data = await response.json();
       rawContent = (data?.choices?.[0]?.message?.content || "").trim();
-      let reply = rawContent;
+      let reply = "";
       let savedRecord: any = null;
 
       // 2. Parse Structured JSON to create ticket
-      const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+      // Try to extract and auto-repair truncated JSON (add missing closing brace)
+      let rawJson = rawContent;
+      const jsonMatch = rawContent.match(/\{[\s\S]*/);
+      if (jsonMatch) {
+        rawJson = jsonMatch[0].trim();
+        // Count braces to detect truncation
+        const opens = (rawJson.match(/\{/g) || []).length;
+        const closes = (rawJson.match(/\}/g) || []).length;
+        if (opens > closes) {
+          rawJson = rawJson + "}".repeat(opens - closes);
+        }
+      }
+
       if (jsonMatch) {
         try {
-          const parsedJson = JSON.parse(jsonMatch[0].trim());
+          const parsedJson = JSON.parse(rawJson);
           if (parsedJson.intent === "create_service_ticket") {
              const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
              const isDisambiguationActive = !!(lastAssistantMessage && lastAssistantMessage.content.includes("Please clarify"));
@@ -452,6 +464,11 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
             reply = `Parsing error: ${jsonErr.message || "Failed to parse ticket parameters."}`;
           }
         }
+      }
+
+      // Fallback: if reply is still empty (LLM returned natural language, not JSON), display it directly
+      if (!reply) {
+        reply = rawContent || "I'm sorry, I couldn't process that request.";
       }
 
       if (activeChatScopeRef.current !== sendScopeKey) return;
