@@ -331,6 +331,40 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
             savedRecord = null;
           } else if (parsedJson.intent === "missing_information") {
             const missing = Array.isArray(parsedJson.missingFields) ? parsedJson.missingFields.join(", ") : "customerName or description";
+            
+            if (parsedJson.customerName && parsedJson.customerName !== "extracted customer name or null") {
+              const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
+              const isDisambiguationActive = !!(lastAssistantMessage && lastAssistantMessage.content.includes("Please clarify"));
+
+              const checkResponse = await fetch("/api/services", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${currentUser?.token || ""}`
+                },
+                body: JSON.stringify({
+                  customerName: parsedJson.customerName,
+                  description: "customer existence verification dry run",
+                  dryRun: true,
+                  confirmFirstCandidate: isDisambiguationActive
+                })
+              });
+
+              if (!checkResponse.ok) {
+                const checkErr = await checkResponse.json();
+                if (checkErr.error === "disambiguation_required" && Array.isArray(checkErr.candidates)) {
+                  const candidates = checkErr.candidates;
+                  let clarifyMsg = "";
+                  if (candidates.length === 1) {
+                    clarifyMsg = `Customer "${checkErr.typedName}" was not found. Please clarify, is that the customer you are asking for?\n- ${candidates[0]}`;
+                  } else {
+                    clarifyMsg = `Customer "${checkErr.typedName}" was not found. Please clarify, did you mean one of these?\n` + candidates.map(c => `- ${c}`).join("\n");
+                  }
+                  throw { isFriendlyDisambiguation: true, friendlyMessage: clarifyMsg };
+                }
+              }
+            }
+
             reply = `I need some more information to create the ticket. Please specify: **${missing}**.`;
           }
         } catch (jsonErr: any) {

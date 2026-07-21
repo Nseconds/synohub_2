@@ -551,13 +551,15 @@ If customerName is missing, description is missing, or both are missing, return 
 
 {
 "intent": "missing_information",
+"customerName": "extracted customer name or null",
+"description": "extracted description or null",
 "missingFields": [
 "customerName",
 "description"
 ]
 }
 
-Include only the fields that are actually missing.
+Include only the fields that are actually missing in the missingFields array.
 
 Examples:
 
@@ -565,6 +567,8 @@ Missing customerName only:
 
 {
 "intent": "missing_information",
+"customerName": null,
+"description": "gps issue",
 "missingFields": [
 "customerName"
 ]
@@ -574,6 +578,8 @@ Missing description only:
 
 {
 "intent": "missing_information",
+"customerName": "Al Nasser",
+"description": null,
 "missingFields": [
 "description"
 ]
