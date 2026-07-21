@@ -523,17 +523,86 @@ app.post("/api/services", async (req, res) => {
       }
     }
 
-    // For dry-runs (customer verification only), short-circuit here after resolving customer
+    let contactPersonVal = body.contactPerson || body.contactName || null;
+    let contactNumberVal = body.contactNumber || body.phone || null;
+    let emailVal = body.email || null;
+    let addressVal = body.address || null;
+    let regionVal = body.region || null;
+    let implementationTypeVal = body.implementationType || null;
+    let salesPersonVal = body.assignee || body.salesPerson || null;
+    let customerUsernameVal: any = null;
+
+    if (customerId > 0) {
+      try {
+        const [custRows]: any = await pool.query(
+          "SELECT contact_name, phone, email, address, region, implementation_type, salesPerson FROM customers WHERE id = ? LIMIT 1",
+          [customerId]
+        );
+        if (custRows && custRows[0]) {
+          if (!contactPersonVal) contactPersonVal = custRows[0].contact_name;
+          if (!contactNumberVal) contactNumberVal = custRows[0].phone;
+          if (!emailVal) emailVal = custRows[0].email;
+          if (!addressVal) addressVal = custRows[0].address;
+          if (!regionVal) regionVal = custRows[0].region;
+          if (!implementationTypeVal) implementationTypeVal = custRows[0].implementation_type;
+          if (!salesPersonVal && custRows[0].salesPerson) {
+            salesPersonVal = userIdToNameMap[custRows[0].salesPerson] || null;
+          }
+        }
+      } catch (err) {
+        console.error("Failed to query contact details from customers table:", err);
+      }
+    }
+
+    try {
+      const [locRows]: any = await pool.query(
+        "SELECT customer_username FROM customers_locator WHERE customer_name = ? LIMIT 1",
+        [finalCustomerName]
+      );
+      if (locRows && locRows[0]) {
+        customerUsernameVal = locRows[0].customer_username;
+      }
+    } catch (err) {
+      console.error("Failed to query customer_username from customers_locator:", err);
+    }
+
+    // Clean up description if customer name is trailing at the end (e.g. "dash cam not working for - Garlic Restaurant")
+    let rawDesc = (body.comment || body.description || "").trim();
+    if (rawDesc && finalCustomerName) {
+      const escapedCust = finalCustomerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`\\s*(?:for\\s*[-:]*\\s*${escapedCust}|[-:]*\\s*${escapedCust})$`, 'i');
+      rawDesc = rawDesc.replace(re, '').trim();
+    }
+
+    // For dry-runs (customer verification only), short-circuit here after resolving customer and contact defaults
     if (body.dryRun && customerId > 0) {
       return res.status(200).json({
         success: true,
         dryRun: true,
         customerId,
-        customerName: finalCustomerName
+        customerName: finalCustomerName,
+        customerUsername: customerUsernameVal,
+        contactPerson: contactPersonVal,
+        contactNumber: contactNumberVal,
+        email: emailVal,
+        address: addressVal,
+        region: regionVal,
+        implementationType: implementationTypeVal,
+        assignee: salesPersonVal,
+        description: rawDesc,
+        quantity: parseInt(body.newQty || body.quantity || "1") || 1,
+        vehiclePlate: body.vehiclePlate || null,
+        accessories: body.accessories || null,
+        driverNumber: body.driverNumber || null,
+        preferredDateTime: body.preferredDateTime || null,
+        requestedPerson: body.requestedPerson || "admin",
+        amount: body.projectValue || body.amount || null,
+        payment: body.paymentOption || body.payment || "Applicable",
+        link: body.mapLink || body.link || null
       });
     }
 
-    const assigneeName = body.assignee || body.salesPerson;
+    const assigneeName = salesPersonVal || body.assignee || body.salesPerson;
     const reqName = body.requestedPerson;
     if (!assigneeName && !reqName) {
       return res.status(400).json({ error: "Level 1 Assignee and Requested Person cannot both be empty" });
@@ -546,7 +615,7 @@ app.post("/api/services", async (req, res) => {
     const L1_assigned_to = await resolveUserIdByName(resolvedAssignee);
     const reqUserId = await resolveUserIdByName(reqName || "admin");
 
-    let descVal = body.comment || body.description || "";
+    let descVal = rawDesc;
     const qtyVal = parseInt(body.newQty || body.quantity || "1") || 1;
 
     const payment = body.paymentOption || body.payment;
@@ -567,45 +636,17 @@ app.post("/api/services", async (req, res) => {
 
     let customerExpDate: any = null;
     let locatorPlanVal: any = null;
-    let customerUsernameVal: any = null;
     try {
       const [locRows]: any = await pool.query(
         "SELECT customer_username, customer_expiry_date, locator_plan FROM customers_locator WHERE customer_name = ? LIMIT 1",
         [finalCustomerName]
       );
       if (locRows && locRows[0]) {
-        customerUsernameVal = locRows[0].customer_username;
         customerExpDate = locRows[0].customer_expiry_date;
         locatorPlanVal = locRows[0].locator_plan;
       }
     } catch (err) {
       console.error("Failed to query customer_expiry_date/locator_plan from customers_locator:", err);
-    }
-
-    let contactPersonVal = body.contactPerson || body.contactName || null;
-    let contactNumberVal = body.contactNumber || body.phone || null;
-    let emailVal = body.email || null;
-    let addressVal = body.address || null;
-    let regionVal = body.region || null;
-    let implementationTypeVal = body.implementationType || null;
-
-    if (customerId > 0) {
-      try {
-        const [custRows]: any = await pool.query(
-          "SELECT contact_name, phone, email, address, region, implementation_type FROM customers WHERE id = ? LIMIT 1",
-          [customerId]
-        );
-        if (custRows && custRows[0]) {
-          if (!contactPersonVal) contactPersonVal = custRows[0].contact_name;
-          if (!contactNumberVal) contactNumberVal = custRows[0].phone;
-          if (!emailVal) emailVal = custRows[0].email;
-          if (!addressVal) addressVal = custRows[0].address;
-          if (!regionVal) regionVal = custRows[0].region;
-          if (!implementationTypeVal) implementationTypeVal = custRows[0].implementation_type;
-        }
-      } catch (err) {
-        console.error("Failed to query contact details from customers table:", err);
-      }
     }
 
     if (body.vehiclePlate) descVal += `\nVehicle Plate: ${body.vehiclePlate}`;
