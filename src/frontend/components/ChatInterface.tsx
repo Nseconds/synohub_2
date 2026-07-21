@@ -213,6 +213,98 @@ export const ChatInterface = ({
         }
       }
     }
+
+    // Interceptor: if bot previously asked for description only AND we have a confirmed customer,
+    // use the user's raw message as the description and go straight to dry-run / ticket draft
+    const lastBotMsg = [...messages].reverse().find(m => m.role === "assistant");
+    const waitingForDescription = !!(lastBotMsg && lastBotMsg.content.includes("Please specify:") && lastBotMsg.content.includes("description") && !lastBotMsg.content.includes("customerName"));
+    if (waitingForDescription && confirmedCustomer) {
+      const descriptionText = userMsg.trim();
+      if (descriptionText.length > 2) {
+        setLoading(true);
+        try {
+          const dryRunResponse = await fetch("/api/services", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${currentUser?.token || ""}` },
+            body: JSON.stringify({
+              customerName: confirmedCustomer,
+              description: descriptionText,
+              dryRun: true
+            })
+          });
+          const dryRunData = await dryRunResponse.json();
+          let reply = "";
+          if (dryRunResponse.ok) {
+            const r = dryRunData;
+            setPendingTicket({
+              customerName: r.customerName || confirmedCustomer,
+              description: descriptionText,
+              quantity: r.quantity || 1,
+              amount: r.amount || null,
+              payment: r.payment || null,
+              assignee: r.assignee || null,
+              requestedPerson: r.requestedPerson || currentUser?.name || "admin",
+              region: r.region || null,
+              implementationType: r.implementationType || null,
+              link: r.link || null,
+              contactPerson: r.contactPerson || null,
+              contactNumber: r.contactNumber || null,
+              vehiclePlate: r.vehiclePlate || null,
+              accessories: r.accessories || null,
+              driverNumber: r.driverNumber || null,
+              preferredDateTime: r.preferredDateTime || null
+            });
+            setConfirmedCustomer(null);
+            reply = `🔹SERVICE REQUEST DRAFT (Pending Confirmation)
+
+━━━━━━━━━━━━━━━━━━━━
+CUSTOMER DETAILS
+━━━━━━━━━━━━━━━━━━━━
+*Customer Name   : ${r.customerName || confirmedCustomer}
+*Contact Person  : ${r.contactPerson || "N/A"}
+*Contact Number  : ${r.contactNumber || "N/A"}
+*Driver: ${r.driverNumber || "N/A"}
+
+━━━━━━━━━━━━━━━━━━━━
+SERVICE DETAILS
+━━━━━━━━━━━━━━━━━━━━
+*Implementation Type     : ${r.implementationType || "N/A"}
+*Device Quantity: ${r.quantity || 1}
+*Vehicle Plate : ${r.vehiclePlate || "N/A"}
+*Installation Location : ${r.region || "N/A"}
+*Description : ${descriptionText}
+*accessories : ${r.accessories || "N/A"}
+*Sales person : ${r.assignee || ""}
+*Requested By    : ${r.requestedPerson || currentUser?.name || "admin"}
+
+━━━━━━━━━━━━━━━━━━━━
+PAYMENT DETAILS
+━━━━━━━━━━━━━━━━━━━━
+Amount          : ${r.amount || ""}
+
+Please confirm if these details are correct by replying "Confirm" / "Yes" or clicking the confirm button below.`;
+          } else if (dryRunData.error === "disambiguation_required" && Array.isArray(dryRunData.candidates)) {
+            const candidates = dryRunData.candidates;
+            reply = candidates.length === 1
+              ? `Customer "${dryRunData.typedName}" was not found. Please clarify, is that the customer you are asking for?\n- ${candidates[0]}`
+              : `Customer "${dryRunData.typedName}" was not found. Please clarify, did you mean one of these?\n` + candidates.map((c: string) => `- ${c}`).join("\n");
+          } else {
+            reply = `I need some more information to create the ticket. Please specify: **description**.`;
+          }
+          if (activeChatScopeRef.current !== sendScopeKey) return;
+          const finalMsgs: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: reply, username: messageChannel, timestamp: new Date().toISOString(), model: modelUsed }];
+          setMessages(finalMsgs);
+          localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMsgs));
+        } catch (e: any) {
+          const finalMsgs: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: e.message || "Failed to process request.", username: messageChannel, timestamp: new Date().toISOString(), model: modelUsed }];
+          setMessages(finalMsgs);
+          localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMsgs));
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
+    }
     
     setLoading(true);
 
