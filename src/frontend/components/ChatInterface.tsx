@@ -592,7 +592,11 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
       }
     } catch (e: any) {
       if (activeChatScopeRef.current !== sendScopeKey) return;
-      const errorMessage = e.isFriendlyDisambiguation ? e.friendlyMessage : (e.message || "I'm experiencing issues. Please try again.");
+      let errorMessage = e.isFriendlyDisambiguation ? e.friendlyMessage : (e.message || "I'm experiencing issues. Please try again.");
+      const errLower = (errorMessage || "").toLowerCase();
+      if (errLower.includes("429") || errLower.includes("rate limit") || errLower.includes("rate_limit") || errLower.includes("tpd")) {
+        errorMessage = "⚠️ Groq AI service rate limit reached. Please wait a short moment and try again.";
+      }
       const finalMessages: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: errorMessage, username: messageChannel, timestamp: new Date().toISOString(), model: modelUsed }];
       setMessages(finalMessages);
       localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMessages));
