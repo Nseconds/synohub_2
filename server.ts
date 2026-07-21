@@ -480,10 +480,16 @@ app.post("/api/services", async (req, res) => {
     const qtyVal = parseInt(body.newQty || body.quantity || "1") || 1;
 
     const payment = body.paymentOption || body.payment;
-    const paymentVal = payment ? (payment.toLowerCase().replace(/\s+/g, "") === "applicable" ? "applicable" : "notapplicable") : null;
+    let paymentVal = payment ? (payment.toLowerCase().replace(/\s+/g, "") === "applicable" ? "applicable" : "notapplicable") : null;
 
     const amount = body.projectValue || body.amount;
-    const amountVal = (amount !== undefined && amount !== null && amount !== "") ? parseInt(amount) : null;
+    let amountVal = null;
+    if (amount === "same as old" || (typeof amount === "string" && amount.toLowerCase().includes("old"))) {
+      amountVal = null;
+      paymentVal = "applicable";
+    } else {
+      amountVal = (amount !== undefined && amount !== null && amount !== "") ? parseInt(amount) : null;
+    }
 
     const payStatus = body.paymentStatus;
     const payStatusVal = payStatus ? (payStatus.toLowerCase().replace(/\s+/g, "") === "paid" ? "paid" : "notpaid") : null;
@@ -537,54 +543,56 @@ app.post("/api/services", async (req, res) => {
     if (body.driverNumber) descVal += `\nDriver Number: ${body.driverNumber}`;
     if (body.preferredDateTime) descVal += `\nPreferred Date/Time: ${body.preferredDateTime}`;
 
-    await pool.query(
-      `INSERT INTO tbl_customer_services_beta (
-        customer_service_id, 
-        customer_service_customer_id,
-        customer_service_customer_name, 
-        customer_service_customer_contact_name, 
-        customer_service_customer_phone, 
-        customer_service_customer_email, 
-        customer_service_customer_address, 
-        customer_service_address_map,
-        region, 
-        customer_service_customer_type, 
-        customer_service_description, 
-        customer_service_status, 
-        customer_service_quantity, 
-        customer_service_payment, 
-        customer_service_amount, 
-        customer_service_payment_status, 
-        customer_service_L1_assigned_to,
-        requested_by,
-        customer_service_created_by,
-        customer_service_customer_exp_date,
-        locator_plan,
-        customer_service_created_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        nextId,
-        customerId,
-        finalCustomerName,
-        contactPersonVal,
-        contactNumberVal,
-        emailVal,
-        addressVal,
-        mapLinkVal,
-        regionVal,
-        implementationTypeVal || "LOCATOR",
-        descVal,
-        qtyVal,
-        paymentVal,
-        amountVal,
-        payStatusVal,
-        L1_assigned_to || 0,
-        reqUserId || 0,
-        reqUserId || 0,
-        customerExpDate,
-        locatorPlanVal
-      ]
-    );
+    if (!body.dryRun) {
+      await pool.query(
+        `INSERT INTO tbl_customer_services_beta (
+          customer_service_id, 
+          customer_service_customer_id,
+          customer_service_customer_name, 
+          customer_service_customer_contact_name, 
+          customer_service_customer_phone, 
+          customer_service_customer_email, 
+          customer_service_customer_address, 
+          customer_service_address_map,
+          region, 
+          customer_service_customer_type, 
+          customer_service_description, 
+          customer_service_status, 
+          customer_service_quantity, 
+          customer_service_payment, 
+          customer_service_amount, 
+          customer_service_payment_status, 
+          customer_service_L1_assigned_to,
+          requested_by,
+          customer_service_created_by,
+          customer_service_customer_exp_date,
+          locator_plan,
+          customer_service_created_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          nextId,
+          customerId,
+          finalCustomerName,
+          contactPersonVal,
+          contactNumberVal,
+          emailVal,
+          addressVal,
+          mapLinkVal,
+          regionVal,
+          implementationTypeVal || "LOCATOR",
+          descVal,
+          qtyVal,
+          paymentVal,
+          amountVal,
+          payStatusVal,
+          L1_assigned_to || 0,
+          reqUserId || 0,
+          reqUserId || 0,
+          customerExpDate,
+          locatorPlanVal
+        ]
+      );
+    }
 
     return res.json({ 
       ...body,
@@ -595,7 +603,9 @@ app.post("/api/services", async (req, res) => {
       email: emailVal || "",
       address: addressVal || "",
       region: regionVal || "",
-      implementationType: implementationTypeVal || "LOCATOR"
+      implementationType: implementationTypeVal || "LOCATOR",
+      amount: (body.amount === "same as old" || (typeof body.amount === "string" && body.amount.toLowerCase().includes("old"))) ? "same as old" : amountVal,
+      payment: paymentVal
     });
   } catch (err: any) {
     console.error("Create service request failed:", err);

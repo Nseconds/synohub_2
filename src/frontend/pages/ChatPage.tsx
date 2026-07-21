@@ -38,6 +38,8 @@ interface ChatPageProps {
   onInputChange: (value: string) => void;
   onSend: () => void;
   usersList?: { id: number; name: string; username: string }[];
+  pendingTicket?: any | null;
+  onConfirmPendingTicket?: () => void;
 }
 
 const getChatTargetLabel = (target: string) => {
@@ -63,6 +65,8 @@ export const ChatPage = ({
   onInputChange,
   onSend,
   usersList = [],
+  pendingTicket = null,
+  onConfirmPendingTicket
 }: ChatPageProps) => (
   <div className="max-w-4xl mx-auto px-4">
     <div className="flex flex-col h-[700px] border border-zinc-200 rounded-2xl overflow-hidden bg-white shadow-lg">
@@ -177,6 +181,20 @@ export const ChatPage = ({
           </div>
         )}
       </div>
+      
+      {pendingTicket && (
+        <div className="px-6 py-3 bg-[#e6f8fa] border-t border-b border-zinc-200 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 font-semibold text-zinc-700">
+            <span>Ticket details resolved. Please click to confirm database insertion:</span>
+          </div>
+          <button
+            onClick={onConfirmPendingTicket}
+            className="bg-[#00ADC6] text-white rounded px-4.5 py-2 font-bold hover:bg-[#047E8F] transition-all cursor-pointer shadow-sm text-xs"
+          >
+            Confirm and Create Ticket
+          </button>
+        </div>
+      )}
 
       {/* Input Bar */}
       <div className="p-4 bg-white border-t border-zinc-100">

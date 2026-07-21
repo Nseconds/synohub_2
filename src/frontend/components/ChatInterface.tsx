@@ -42,6 +42,7 @@ export const ChatInterface = ({
   const chatScopeKey = `${userKey || ""}|${currentUser?.role || ""}|${selectedChatTarget}|${aiMode}`;
   const [usersList, setUsersList] = useState<{ id: number; name: string; username: string }[]>([]);
   const [groqConfig, setGroqConfig] = useState<{ apiKey: string; model: string }>({ apiKey: "", model: "llama-3.1-8b-instant" });
+  const [pendingTicket, setPendingTicket] = useState<any | null>(null);
 
   const getBaseChatChannel = (target: string) => {
     if (target.startsWith("user:")) return target;
@@ -139,9 +140,19 @@ export const ChatInterface = ({
     const updatedUserMessages: Message[] = [...messages, { role: "user" as const, content: userMsg, username: messageChannel, timestamp: new Date().toISOString() }];
     setMessages(updatedUserMessages);
     localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(updatedUserMessages));
+
+    const sendScopeKey = chatScopeKey;
+    if (pendingTicket) {
+      const normalizedMsg = userMsg.trim().toLowerCase();
+      if (normalizedMsg === "confirm" || normalizedMsg === "yes" || normalizedMsg === "ok" || normalizedMsg === "go ahead") {
+        await handleConfirmPendingTicket(pendingTicket, updatedUserMessages, sendScopeKey, messageChannel);
+        return;
+      } else {
+        setPendingTicket(null);
+      }
+    }
     
     setLoading(true);
-    const sendScopeKey = chatScopeKey;
     let modelUsed = groqConfig.model || "llama-3.1-8b-instant";
 
     try {
@@ -250,7 +261,8 @@ export const ChatInterface = ({
                 accessories: parsedJson.accessories || null,
                 driverNumber: parsedJson.driverNumber || null,
                 preferredDateTime: parsedJson.preferredDateTime || null,
-                confirmFirstCandidate: isDisambiguationActive
+                confirmFirstCandidate: isDisambiguationActive,
+                dryRun: true
               })
             });
 
@@ -270,13 +282,31 @@ export const ChatInterface = ({
             }
 
             const insertResult = await insertResponse.json();
-            reply = `🔹SERVICE REQUEST
+            setPendingTicket({
+              customerName: insertResult.customerName,
+              description: insertResult.description,
+              quantity: insertResult.quantity,
+              amount: insertResult.amount,
+              payment: insertResult.payment,
+              assignee: insertResult.assignee,
+              requestedPerson: insertResult.requestedPerson,
+              region: insertResult.region,
+              implementationType: insertResult.implementationType,
+              link: insertResult.link,
+              contactPerson: insertResult.contactPerson,
+              contactNumber: insertResult.contactNumber,
+              vehiclePlate: insertResult.vehiclePlate,
+              accessories: insertResult.accessories,
+              driverNumber: insertResult.driverNumber,
+              preferredDateTime: insertResult.preferredDateTime
+            });
+            reply = `🔹SERVICE REQUEST DRAFT (Pending Confirmation)
 
 ━━━━━━━━━━━━━━━━━━━━
 CUSTOMER DETAILS
 ━━━━━━━━━━━━━━━━━━━━
-*Customer Name   : ${insertResult.customerName || "N/A"}${insertResult.customerUsername ? ` | ${insertResult.customerUsername}` : ""}
-*Contact Person  : ${insertResult.contactPerson || "N/A"}
+*Customer Name   : ${insertResult.customerName || "N/A"}
+${insertResult.customerUsername ? `*Customer Username: ${insertResult.customerUsername}\n` : ""}*Contact Person  : ${insertResult.contactPerson || "N/A"}
 *Contact Number  : ${insertResult.contactNumber || "N/A"}
 *Driver: ${insertResult.driverNumber || "N/A"}
 
@@ -285,10 +315,7 @@ SERVICE DETAILS
 ━━━━━━━━━━━━━━━━━━━━
 *Implementation Type     : ${insertResult.implementationType || "N/A"}
 *Device Quantity: ${insertResult.quantity || 1}
-*Vehicle Plate : 
-
-${insertResult.vehiclePlate || "N/A"}
-
+*Vehicle Plate : ${insertResult.vehiclePlate || "N/A"}
 *Installation Location : ${insertResult.region || "N/A"}
 *Description : ${insertResult.description || "N/A"}
 *accessories : ${insertResult.accessories || "N/A"}
@@ -298,11 +325,10 @@ ${insertResult.vehiclePlate || "N/A"}
 ━━━━━━━━━━━━━━━━━━━━
 PAYMENT DETAILS
 ━━━━━━━━━━━━━━━━━━━━
-Amount          : ${insertResult.amount || ""}`;
-            savedRecord = {
-              type: "service",
-              customerName: parsedJson.customerName
-            };
+Amount          : ${insertResult.amount || ""}
+
+Please confirm if these details are correct by replying "Confirm" / "Yes" or clicking the confirm button below.`;
+            savedRecord = null;
           } else if (parsedJson.intent === "missing_information") {
             const missing = Array.isArray(parsedJson.missingFields) ? parsedJson.missingFields.join(", ") : "customerName or description";
             reply = `I need some more information to create the ticket. Please specify: **${missing}**.`;
@@ -337,6 +363,93 @@ Amount          : ${insertResult.amount || ""}`;
     }
   };
 
+  const handleConfirmPendingTicket = async (
+    ticket: any, 
+    updatedUserMessages: Message[], 
+    sendScopeKey: string, 
+    messageChannel: string
+  ) => {
+    setLoading(true);
+    try {
+      const insertResponse = await fetch("/api/services", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${currentUser?.token || ""}`
+        },
+        body: JSON.stringify({
+          ...ticket,
+          dryRun: false
+        })
+      });
+
+      if (!insertResponse.ok) {
+        const insertErr = await insertResponse.json();
+        throw new Error(insertErr.error || "Failed to log service ticket in database.");
+      }
+
+      const insertResult = await insertResponse.json();
+      const reply = `🔹SERVICE REQUEST (Created Successfully)
+
+━━━━━━━━━━━━━━━━━━━━
+CUSTOMER DETAILS
+━━━━━━━━━━━━━━━━━━━━
+*Customer Name   : ${insertResult.customerName || "N/A"}
+${insertResult.customerUsername ? `*Customer Username: ${insertResult.customerUsername}\n` : ""}*Contact Person  : ${insertResult.contactPerson || "N/A"}
+*Contact Number  : ${insertResult.contactNumber || "N/A"}
+*Driver: ${insertResult.driverNumber || "N/A"}
+
+━━━━━━━━━━━━━━━━━━━━
+SERVICE DETAILS
+━━━━━━━━━━━━━━━━━━━━
+*Implementation Type     : ${insertResult.implementationType || "N/A"}
+*Device Quantity: ${insertResult.quantity || 1}
+*Vehicle Plate : ${insertResult.vehiclePlate || "N/A"}
+*Installation Location : ${insertResult.region || "N/A"}
+*Description : ${insertResult.description || "N/A"}
+*accessories : ${insertResult.accessories || "N/A"}
+*Sales person : ${insertResult.assignee || ""}
+*Requested By    : ${insertResult.requestedPerson || currentUser?.name || "admin"}
+
+━━━━━━━━━━━━━━━━━━━━
+PAYMENT DETAILS
+━━━━━━━━━━━━━━━━━━━━
+Amount          : ${insertResult.amount || ""}`;
+
+      if (activeChatScopeRef.current !== sendScopeKey) return;
+
+      const finalMessages: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: reply, username: messageChannel, timestamp: new Date().toISOString() }];
+      setMessages(finalMessages);
+      localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMessages));
+      setPendingTicket(null);
+
+      if (onRecordSaved) {
+        onRecordSaved({
+          type: "service",
+          customerName: insertResult.customerName
+        });
+      }
+    } catch (e: any) {
+      if (activeChatScopeRef.current !== sendScopeKey) return;
+      const errorMessage = e.message || "Failed to confirm ticket.";
+      const finalMessages: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: errorMessage, username: messageChannel, timestamp: new Date().toISOString() }];
+      setMessages(finalMessages);
+      localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMessages));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmPendingTicketBtn = () => {
+    if (!pendingTicket || loading) return;
+    const messageChannel = getModeChatChannel(aiMode, selectedChatTarget);
+    const mockUserMsg: Message = { role: "user" as const, content: "Confirm", username: messageChannel, timestamp: new Date().toISOString() };
+    const updatedUserMessages = [...messages, mockUserMsg];
+    setMessages(updatedUserMessages);
+    localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(updatedUserMessages));
+    handleConfirmPendingTicket(pendingTicket, updatedUserMessages, chatScopeKey, messageChannel);
+  };
+
   return (
     <ChatPage
       currentUser={currentUser ?? null}
@@ -359,6 +472,8 @@ Amount          : ${insertResult.amount || ""}`;
       onInputChange={setInput}
       onSend={handleSend}
       usersList={usersList}
+      pendingTicket={pendingTicket}
+      onConfirmPendingTicket={handleConfirmPendingTicketBtn}
     />
   );
 };

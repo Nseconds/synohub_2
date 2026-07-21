@@ -370,7 +370,8 @@ null
 
 amount
 
-Extract a non-negative numeric value only when clearly provided.
+Extract a non-negative numeric value only when clearly provided. If the user explicitly asks for the amount to be the same as their previous or old ticket, set amount to:
+"same as old"
 
 Do not include currency symbols or formatted text.
 
@@ -611,7 +612,7 @@ For create_service_ticket and missing_information:
 * Do not add undeclared fields.
 * Use JSON null, not "null", "N/A", "-", or empty placeholder text.
 * quantity must be a positive integer.
-* amount must be a non-negative JSON number or null.
+* amount must be a non-negative JSON number, the string "same as old", or null.
 
 ---
 
