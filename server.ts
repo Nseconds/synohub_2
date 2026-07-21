@@ -428,7 +428,12 @@ app.post("/api/services", async (req, res) => {
     let customerId = 0;
     let finalCustomerName = customerNameVal;
 
-    if (exactMatches && exactMatches.length > 0) {
+    // Only use exact match if the name is a PRECISE case-sensitive match
+    // (avoid eating 'fujairah' lowercase junk record when user searches 'Fujairah')
+    const preciseExact = exactMatches && exactMatches.length > 0 &&
+      exactMatches[0].name === customerNameVal;
+    
+    if (preciseExact) {
       customerId = exactMatches[0].id;
       finalCustomerName = exactMatches[0].name;
     } else {
@@ -489,6 +494,13 @@ app.post("/api/services", async (req, res) => {
             score += 100;
           }
           
+          // Penalize all-lowercase names (likely generic/test records like 'fujairah')
+          if (row.name === row.name.toLowerCase()) score -= 50;
+          
+          // Boost names that contain multiple words (proper company names)
+          const wordCount = row.name.trim().split(/\s+/).length;
+          if (wordCount >= 2) score += 10;
+          
           score -= row.name.length * 0.1;
           return { row, score };
         });
@@ -509,6 +521,16 @@ app.post("/api/services", async (req, res) => {
           typedName: customerNameVal
         });
       }
+    }
+
+    // For dry-runs (customer verification only), short-circuit here after resolving customer
+    if (body.dryRun && customerId > 0) {
+      return res.status(200).json({
+        success: true,
+        dryRun: true,
+        customerId,
+        customerName: finalCustomerName
+      });
     }
 
     const assigneeName = body.assignee || body.salesPerson;
