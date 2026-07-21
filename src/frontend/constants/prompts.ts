@@ -590,8 +590,34 @@ If the user only says:
 * create a ticket for Al Nasser
 * log a service ticket for ferostestonly
 * raise a ticket for ABC Company
+* make service ticket for Fujairah
+* create ticket for joys
+* service for Al Fujaira
 
-Treat description as missing.
+Extract the customer name after "for" and treat description as missing. The word or phrase after "for" is the customerName — always extract it.
+
+For example:
+User: "make service ticket for Fujairah"
+Correct output:
+{
+"intent": "missing_information",
+"customerName": "Fujairah",
+"description": null,
+"missingFields": [
+"description"
+]
+}
+
+User: "create ticket for joys facilities"
+Correct output:
+{
+"intent": "missing_information",
+"customerName": "joys facilities",
+"description": null,
+"missingFields": [
+"description"
+]
+}
 
 Do not use the ticket command itself as the description.
 
