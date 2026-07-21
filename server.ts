@@ -436,17 +436,44 @@ app.post("/api/services", async (req, res) => {
       const words = customerNameVal
         .split(/\s+/)
         .map((w: string) => w.trim())
-        .filter((w: string) => w.length > 2); // only words with length > 2
+        .filter((w: string) => w.length >= 2); // only words with length >= 2
 
       let candidates: any[] = [];
       if (words.length > 0) {
         const likeClauses = words.map(() => "name LIKE ?").join(" OR ");
         const likeParams = words.map((w: string) => `%${w}%`);
         const [fuzzyRows]: any = await pool.query(
-          `SELECT id, name FROM customers WHERE ${likeClauses} LIMIT 5`,
+          `SELECT id, name FROM customers WHERE ${likeClauses} LIMIT 100`,
           likeParams
         );
-        candidates = fuzzyRows || [];
+        
+        const scored = (fuzzyRows || []).map((row: any) => {
+          const nameLower = row.name.toLowerCase();
+          let score = 0;
+          let matchedWordsCount = 0;
+          
+          for (const w of words) {
+            const wLower = w.toLowerCase();
+            if (nameLower.includes(wLower)) {
+              matchedWordsCount++;
+              const wordWeight = wLower.length > 2 ? 20 : 5;
+              score += wordWeight;
+              
+              if (nameLower.startsWith(wLower)) score += 10;
+              if (new RegExp(`\\b${wLower}\\b`).test(nameLower)) score += 5;
+            }
+          }
+          
+          if (matchedWordsCount === words.length) {
+            score += 100;
+          }
+          
+          score -= row.name.length * 0.1;
+          return { row, score };
+        });
+        
+        scored.sort((a: any, b: any) => b.score - a.score);
+        candidates = scored.slice(0, 5).map((x: any) => x.row);
       }
 
       if (candidates.length === 0) {

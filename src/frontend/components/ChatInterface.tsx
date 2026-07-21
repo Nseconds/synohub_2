@@ -361,6 +361,8 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
                     clarifyMsg = `Customer "${checkErr.typedName}" was not found. Please clarify, did you mean one of these?\n` + candidates.map(c => `- ${c}`).join("\n");
                   }
                   throw { isFriendlyDisambiguation: true, friendlyMessage: clarifyMsg };
+                } else if (checkErr.error) {
+                  throw { isFriendlyDisambiguation: true, friendlyMessage: `Customer "${parsedJson.customerName}" was not found.` };
                 }
               }
             }
