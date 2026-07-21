@@ -440,12 +440,33 @@ app.post("/api/services", async (req, res) => {
 
       let candidates: any[] = [];
       if (words.length > 0) {
-        const likeClauses = words.map(() => "name LIKE ?").join(" OR ");
-        const likeParams = words.map((w: string) => `%${w}%`);
-        const [fuzzyRows]: any = await pool.query(
-          `SELECT id, name FROM customers WHERE ${likeClauses} LIMIT 100`,
-          likeParams
+        // Try AND matching first for precise intersection matches
+        const andClauses = words.map(() => "name LIKE ?").join(" AND ");
+        const andParams = words.map((w: string) => `%${w}%`);
+        const [andRows]: any = await pool.query(
+          `SELECT id, name FROM customers WHERE ${andClauses} LIMIT 50`,
+          andParams
         );
+        
+        let fuzzyRows = andRows || [];
+        
+        // If less than 5 matches are found, supplement with OR query
+        if (fuzzyRows.length < 5) {
+          const orClauses = words.map(() => "name LIKE ?").join(" OR ");
+          const orParams = words.map((w: string) => `%${w}%`);
+          const [orRows]: any = await pool.query(
+            `SELECT id, name FROM customers WHERE ${orClauses} LIMIT 100`,
+            orParams
+          );
+          
+          const seenIds = new Set(fuzzyRows.map((r: any) => r.id));
+          for (const row of (orRows || [])) {
+            if (!seenIds.has(row.id)) {
+              fuzzyRows.push(row);
+              seenIds.add(row.id);
+            }
+          }
+        }
         
         const scored = (fuzzyRows || []).map((row: any) => {
           const nameLower = row.name.toLowerCase();

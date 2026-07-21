@@ -336,6 +336,21 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
               const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
               const isDisambiguationActive = !!(lastAssistantMessage && lastAssistantMessage.content.includes("Please clarify"));
 
+              // Extract candidate list from previous disambiguation message
+              let previousCandidates: string[] = [];
+              if (isDisambiguationActive && lastAssistantMessage) {
+                const lines = lastAssistantMessage.content.split("\n");
+                previousCandidates = lines
+                  .filter((l: string) => l.startsWith("- "))
+                  .map((l: string) => l.substring(2).trim());
+              }
+              
+              // Check if user's input matches one of the listed candidates (partial match)
+              const userInput = parsedJson.customerName.toLowerCase();
+              const matchedCandidate = previousCandidates.find(c => 
+                c.toLowerCase().includes(userInput) || userInput.includes(c.toLowerCase().substring(0, 8))
+              );
+
               const checkResponse = await fetch("/api/services", {
                 method: "POST",
                 headers: {
@@ -343,10 +358,10 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
                   "Authorization": `Bearer ${currentUser?.token || ""}`
                 },
                 body: JSON.stringify({
-                  customerName: parsedJson.customerName,
+                  customerName: matchedCandidate || parsedJson.customerName,
                   description: "customer existence verification dry run",
                   dryRun: true,
-                  confirmFirstCandidate: isDisambiguationActive
+                  confirmFirstCandidate: isDisambiguationActive && !matchedCandidate
                 })
               });
 
