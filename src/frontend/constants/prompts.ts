@@ -585,34 +585,40 @@ Missing description only:
 ]
 }
 
-If the user only says:
+If the user ONLY provides a customer name without any issue or service details (e.g., "create a ticket for Al Nasser", "make service ticket for Fujairah", "service for Al Fujaira"), treat description as missing.
 
-* create a ticket for Al Nasser
-* log a service ticket for ferostestonly
-* raise a ticket for ABC Company
-* make service ticket for Fujairah
-* create ticket for joys
-* service for Al Fujaira
+However, if the user provides an issue, problem, or service detail along with "for <Customer>" (e.g., "dash cam not working for - Garlic Restaurant", "GPS issue for Al Nasser", "camera replacement for - XYZ"), extract BOTH description ("dash cam not working") and customerName ("Garlic Restaurant"). In this case, both required fields are present, so return "intent": "create_service_ticket".
 
-Extract the customer name after "for" and treat description as missing. The word or phrase after "for" is the customerName — always extract it.
+Examples:
 
-For example:
+User: "dash cam not working for - Garlic Restaurant"
+Correct output:
+{
+"intent": "create_service_ticket",
+"customerName": "Garlic Restaurant",
+"customerUsername": null,
+"contactPerson": null,
+"contactNumber": null,
+"description": "dash cam not working",
+"driverNumber": null,
+"quantity": 1,
+"vehiclePlate": null,
+"accessories": null,
+"region": null,
+"preferredDateTime": null,
+"requestedPerson": null,
+"amount": null,
+"payment": null,
+"assignee": null,
+"link": null,
+"implementationType": "SERVICE"
+}
+
 User: "make service ticket for Fujairah"
 Correct output:
 {
 "intent": "missing_information",
 "customerName": "Fujairah",
-"description": null,
-"missingFields": [
-"description"
-]
-}
-
-User: "create ticket for joys facilities"
-Correct output:
-{
-"intent": "missing_information",
-"customerName": "joys facilities",
 "description": null,
 "missingFields": [
 "description"
