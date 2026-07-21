@@ -43,6 +43,7 @@ export const ChatInterface = ({
   const [usersList, setUsersList] = useState<{ id: number; name: string; username: string }[]>([]);
   const [groqConfig, setGroqConfig] = useState<{ apiKey: string; model: string }>({ apiKey: "", model: "llama-3.1-8b-instant" });
   const [pendingTicket, setPendingTicket] = useState<any | null>(null);
+  const [confirmedCustomer, setConfirmedCustomer] = useState<string | null>(null);
 
   const getBaseChatChannel = (target: string) => {
     if (target.startsWith("user:")) return target;
@@ -317,7 +318,7 @@ export const ChatInterface = ({
                 "Authorization": `Bearer ${currentUser?.token || ""}`
               },
               body: JSON.stringify({
-                customerName: parsedJson.customerName,
+                customerName: parsedJson.customerName || confirmedCustomer,
                 description: parsedJson.description,
                 quantity: parsedJson.quantity || 1,
                 amount: parsedJson.amount || null,
@@ -401,10 +402,22 @@ Amount          : ${insertResult.amount || ""}
 
 Please confirm if these details are correct by replying "Confirm" / "Yes" or clicking the confirm button below.`;
             savedRecord = null;
+            setConfirmedCustomer(null); // clear confirmed customer after ticket is drafted
           } else if (parsedJson.intent === "missing_information") {
-            const missing = Array.isArray(parsedJson.missingFields) ? parsedJson.missingFields.join(", ") : "customerName or description";
+            let missingFields = Array.isArray(parsedJson.missingFields) ? [...parsedJson.missingFields] : ["customerName", "description"];
             
-            if (parsedJson.customerName && parsedJson.customerName !== "extracted customer name or null") {
+            const effectiveCustomerName = (parsedJson.customerName && parsedJson.customerName !== "extracted customer name or null") 
+              ? parsedJson.customerName 
+              : (confirmedCustomer || "");
+
+            // If we have a confirmed customer but LLM erroneously lists customerName as missing, remove it
+            if (effectiveCustomerName && confirmedCustomer && missingFields.includes("customerName")) {
+              missingFields = missingFields.filter(f => f !== "customerName");
+            }
+
+            const missing = missingFields.join(", ") || "description";
+
+            if (effectiveCustomerName) {
               const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
               const isDisambiguationActive = !!(lastAssistantMessage && lastAssistantMessage.content.includes("Please clarify"));
 
@@ -418,7 +431,7 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
               }
               
               // Check if user's input matches one of the listed candidates (partial match)
-              const userInput = parsedJson.customerName.toLowerCase();
+              const userInput = effectiveCustomerName.toLowerCase();
               const matchedCandidate = previousCandidates.find(c => 
                 c.toLowerCase().includes(userInput) || userInput.includes(c.toLowerCase().substring(0, 8))
               );
@@ -430,7 +443,7 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
                   "Authorization": `Bearer ${currentUser?.token || ""}`
                 },
                 body: JSON.stringify({
-                  customerName: matchedCandidate || parsedJson.customerName,
+                  customerName: effectiveCustomerName,
                   description: "customer existence verification dry run",
                   dryRun: true,
                   confirmFirstCandidate: isDisambiguationActive && !matchedCandidate
@@ -449,9 +462,15 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
                   }
                   throw { isFriendlyDisambiguation: true, friendlyMessage: clarifyMsg };
                 } else if (checkErr.error) {
-                  throw { isFriendlyDisambiguation: true, friendlyMessage: `Customer "${parsedJson.customerName}" was not found.` };
+                  throw { isFriendlyDisambiguation: true, friendlyMessage: `Customer "${effectiveCustomerName}" was not found.` };
                 }
+              } else {
+                // Customer verified — store as confirmed customer for context persistence
+                const checkData = await checkResponse.json();
+                setConfirmedCustomer(checkData.customerName || effectiveCustomerName);
               }
+            } else if (confirmedCustomer && parsedJson.missingFields && !parsedJson.missingFields.includes("description")) {
+              // Customer was confirmed earlier, only description is missing - that's fine
             }
 
             reply = `I need some more information to create the ticket. Please specify: **${missing}**.`;
