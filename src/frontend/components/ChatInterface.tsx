@@ -313,8 +313,7 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
       const primaryModel = groqConfig.model || "llama-3.1-8b-instant";
       const modelsToTry = Array.from(new Set([
         primaryModel,
-        primaryModel === "llama-3.1-8b-instant" ? "llama-3.3-70b-versatile" : "llama-3.1-8b-instant",
-        "mixtral-8x7b-32768"
+        primaryModel === "llama-3.1-8b-instant" ? "llama-3.3-70b-versatile" : "llama-3.1-8b-instant"
       ]));
 
       let response: Response | null = null;
