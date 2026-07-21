@@ -151,9 +151,69 @@ export const ChatInterface = ({
         setPendingTicket(null);
       }
     }
+
+    let modelUsed = groqConfig.model || "llama-3.1-8b-instant";
+
+    // Check if the user is selecting a candidate from a disambiguation list by ordinal/position
+    const lastAssistantMsg = [...messages].reverse().find(m => m.role === "assistant");
+    if (lastAssistantMsg && lastAssistantMsg.content.includes("Please clarify")) {
+      const disambiguationLines = lastAssistantMsg.content.split("\n").filter((l: string) => l.startsWith("- "));
+      const disambiguationCandidates = disambiguationLines.map((l: string) => l.substring(2).trim());
+
+      if (disambiguationCandidates.length > 0) {
+        const msgLower = userMsg.trim().toLowerCase();
+        const ordinalMap: Record<string, number> = {
+          "1": 0, "first": 0, "first one": 0, "1st": 0, "the first": 0, "option 1": 0,
+          "2": 1, "second": 1, "second one": 1, "2nd": 1, "the second": 1, "option 2": 1,
+          "3": 2, "third": 2, "third one": 2, "3rd": 2, "the third": 2, "option 3": 2,
+          "4": 3, "fourth": 3, "fourth one": 3, "4th": 3, "the fourth": 3, "option 4": 3,
+          "5": 4, "fifth": 4, "fifth one": 4, "5th": 4, "the fifth": 4, "option 5": 4
+        };
+        const selectedIndex = ordinalMap[msgLower];
+        const selectedCandidate = selectedIndex !== undefined ? disambiguationCandidates[selectedIndex] : undefined;
+
+        if (selectedCandidate) {
+          setLoading(true);
+          try {
+            const checkResponse = await fetch("/api/services", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${currentUser?.token || ""}` },
+              body: JSON.stringify({
+                customerName: selectedCandidate,
+                description: "customer existence verification dry run",
+                dryRun: true
+              })
+            });
+            const checkData = await checkResponse.json();
+            let reply = "";
+            if (checkResponse.ok) {
+              reply = `Got it! Customer confirmed as **${selectedCandidate}**. Now please provide a short description of the service required.`;
+            } else if (checkData.error === "disambiguation_required" && Array.isArray(checkData.candidates)) {
+              const newCandidates = checkData.candidates;
+              reply = newCandidates.length === 1
+                ? `Customer "${selectedCandidate}" was not found. Please clarify, is that the customer you are asking for?\n- ${newCandidates[0]}`
+                : `Customer "${selectedCandidate}" was not found. Please clarify, did you mean one of these?\n` + newCandidates.map((c: string) => `- ${c}`).join("\n");
+            } else {
+              reply = `Customer "${selectedCandidate}" was not found in the database.`;
+            }
+            if (activeChatScopeRef.current !== sendScopeKey) return;
+            const finalMsgs: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: reply, username: messageChannel, timestamp: new Date().toISOString(), model: modelUsed }];
+            setMessages(finalMsgs);
+            localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMsgs));
+          } catch (e: any) {
+            const errMsg = e.message || "Failed to verify customer.";
+            const finalMsgs: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: errMsg, username: messageChannel, timestamp: new Date().toISOString(), model: modelUsed }];
+            setMessages(finalMsgs);
+            localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMsgs));
+          } finally {
+            setLoading(false);
+          }
+          return;
+        }
+      }
+    }
     
     setLoading(true);
-    let modelUsed = groqConfig.model || "llama-3.1-8b-instant";
 
     try {
       // 1. Call Groq completions API directly (with fallback models if rate/token limit is hit)
