@@ -204,7 +204,7 @@ If the application provides a confirmed or selected customer name, use that exac
 
 ## CONVERSATION STATE
 
-Maintain one active ticket draft at a time.
+Maintain active ticket details across the conversation.
 
 Carry forward previously supplied ticket details when the user:
 
@@ -215,6 +215,10 @@ Carry forward previously supplied ticket details when the user:
 * clarifies an earlier message
 
 Do not discard previously collected valid fields unless the user changes or clears them.
+
+If a ticket has already been created in the current conversation, and the user provides additional or missing details for that ticket (e.g., "see i forgot to mention vehicle plate in it", "Vehicle Plate : Yaris 57489", "update description to...", "change quantity to 2"), set intent to "update_service_ticket".
+
+Do not create a brand new ticket when the user is simply adding forgotten details or updating fields for a ticket that was just created, unless the user explicitly requests to create a new/separate ticket (e.g., "create another ticket", "new ticket for...").
 
 If the user says:
 
@@ -227,8 +231,6 @@ If the user says:
 
 Clear all previously collected ticket fields.
 
-After a ticket has been successfully created by the CRM, do not reuse its details for a new ticket.
-
 ---
 
 ## CLARIFICATIONS AND CORRECTIONS
@@ -239,7 +241,7 @@ If the user corrects, confirms, or clarifies a field:
 2. Carry forward all other valid ticket details from the conversation.
 3. Revalidate all required fields.
 4. Return missing_information if required fields are still missing.
-5. Return create_service_ticket only when all required fields are available.
+5. Return create_service_ticket (or update_service_ticket if modifying an existing ticket) when all required fields are available.
 
 Example:
 
@@ -265,6 +267,7 @@ intent
 Allowed ticket-related values:
 
 * create_service_ticket
+* update_service_ticket
 * missing_information
 
 customerName
@@ -309,20 +312,22 @@ null
 
 description
 
-Create a concise and factual description of the requested service.
+Create a concise, accurate, and complete description of the requested service.
 
 Include:
 
 * the requested action
 * the reported issue
 * affected equipment or vehicle when relevant
+* ANY AND ALL parenthetical notes, additional user notes, payment collection instructions, or special requests mentioned in the message (e.g., "(need to collect 1 payment also from there)", "(collect cash)", etc.). ALWAYS automatically include and preserve these notes in the description field.
 
 Do not:
 
+* omit parenthetical comments, payment collection notes, or additional user instructions mentioned in the user's message
 * invent a technical diagnosis
 * use "create ticket" as the description
 * use vague words such as "problem", "service", "issue", or "ticket" without meaningful details
-* include unrelated conversation
+* include unrelated conversational filler
 
 driverNumber
 
@@ -542,12 +547,15 @@ null
 
 ## VALIDATION
 
-Required fields:
+Required fields ONLY:
 
 * customerName
 * description
 
-If customerName is missing, description is missing, or both are missing, you MUST return ONLY the following JSON object (do NOT output natural language, conversational text, or markdown explanations):
+NEVER treat customerUsername, contactNumber, contactPerson, vehiclePlate, quantity, region, amount, or implementationType as required missing fields.
+NEVER include customerUsername, contactNumber, or any optional field in missingFields.
+
+If customerName is missing, description is missing, or both are missing, you MUST return ONLY the following JSON object:
 
 {
 "intent": "missing_information",
@@ -559,7 +567,7 @@ If customerName is missing, description is missing, or both are missing, you MUS
 ]
 }
 
-Include only the fields that are actually missing in the missingFields array.
+Include ONLY "customerName" and/or "description" in missingFields. If both customerName and description are present in the user's message, return "intent": "create_service_ticket".
 
 Examples:
 
@@ -623,6 +631,29 @@ Correct output:
 "missingFields": [
 "description"
 ]
+}
+
+User: "i want to create a sevrice ticket for Kohinoor Technical Services 1 vehicle no connection ( need to collect 1 payment also from there ) even Amount is also same as old"
+Correct output:
+{
+"intent": "create_service_ticket",
+"customerName": "Kohinoor Technical Services",
+"customerUsername": null,
+"contactPerson": null,
+"contactNumber": null,
+"description": "1 vehicle no connection (need to collect 1 payment also from there)",
+"driverNumber": null,
+"quantity": 1,
+"vehiclePlate": null,
+"accessories": null,
+"region": null,
+"preferredDateTime": null,
+"requestedPerson": null,
+"amount": "same as old",
+"payment": "Applicable",
+"assignee": null,
+"link": null,
+"implementationType": "LOCATOR"
 }
 
 Do not use the ticket command itself as the description.

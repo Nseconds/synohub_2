@@ -69,6 +69,13 @@ async function resolveUserIdByName(name: string): Promise<number> {
     if (rows && rows[0]) {
       return rows[0].user_id;
     }
+    const [likeRows]: any = await pool.query(
+      "SELECT user_id FROM tbl_users WHERE LOWER(user_name) LIKE ? OR LOWER(user_username) LIKE ? LIMIT 1",
+      [`%${trimmed}%`, `%${trimmed}%`]
+    );
+    if (likeRows && likeRows[0]) {
+      return likeRows[0].user_id;
+    }
   } catch (err) {
     console.error(`Failed to resolve user ID for name "${name}":`, err);
   }
@@ -419,101 +426,159 @@ app.post("/api/services", async (req, res) => {
       return res.status(400).json({ error: "Customer name is required" });
     }
 
-    // Check if customer exists in the DB
+    // 1. Case-insensitive exact match first
     const [exactMatches]: any = await pool.query(
-      "SELECT id, name FROM customers WHERE name = ? LIMIT 1",
-      [customerNameVal]
+      "SELECT id, name FROM customers WHERE LOWER(name) = ? LIMIT 1",
+      [customerNameVal.toLowerCase()]
     );
 
     let customerId = 0;
     let finalCustomerName = customerNameVal;
 
-    // Only use exact match if the name is a PRECISE case-sensitive match
-    // (avoid eating 'fujairah' lowercase junk record when user searches 'Fujairah')
-    const preciseExact = exactMatches && exactMatches.length > 0 &&
-      exactMatches[0].name === customerNameVal;
-    
-    if (preciseExact) {
+    if (exactMatches && exactMatches.length > 0) {
       customerId = exactMatches[0].id;
       finalCustomerName = exactMatches[0].name;
     } else {
-      // Fuzzy word matching
-      const words = customerNameVal
-        .split(/\s+/)
+      // Clean query text: strip parenthetical text like "(Secret)"
+      let cleaned = customerNameVal.replace(/\([^)]*\)/g, "").trim();
+      
+      // Strip legal suffixes / noise words so generic terms like "LLC" don't flood the query
+      const noiseWords = [
+        "llc", "l.l.c.", "l.l.c", "fzc", "fze", "co", "co.", "company", 
+        "limited", "ltd", "ltd.", "inc", "est", "est.", "group", "branch", "services", "service"
+      ];
+      
+      const words = cleaned
+        .split(/[\s,.\-\/]+/)
         .map((w: string) => w.trim())
-        .filter((w: string) => w.length >= 2); // only words with length >= 2
+        .filter((w: string) => w.length >= 2 && !noiseWords.includes(w.toLowerCase()));
+
+      // Core search words with stemmed variants (e.g., "gardens" -> "garden")
+      const stemmedWords = (words.length > 0 ? words : [customerNameVal.trim()]).map(w => {
+        const wLower = w.toLowerCase();
+        if (wLower.endsWith("s") && wLower.length > 3) {
+          return wLower.slice(0, -1);
+        }
+        return wLower;
+      });
 
       let candidates: any[] = [];
-      if (words.length > 0) {
-        // Try AND matching first for precise intersection matches
-        const andClauses = words.map(() => "name LIKE ?").join(" AND ");
-        const andParams = words.map((w: string) => `%${w}%`);
-        const [andRows]: any = await pool.query(
-          `SELECT id, name FROM customers WHERE ${andClauses} LIMIT 50`,
-          andParams
-        );
-        
-        let fuzzyRows = andRows || [];
-        
-        // If less than 5 matches are found, supplement with OR query
-        if (fuzzyRows.length < 5) {
-          const orClauses = words.map(() => "name LIKE ?").join(" OR ");
-          const orParams = words.map((w: string) => `%${w}%`);
-          const [orRows]: any = await pool.query(
-            `SELECT id, name FROM customers WHERE ${orClauses} LIMIT 100`,
-            orParams
+      let candidatePool: any[] = [];
+
+      // Query A: Search customers table by core stemmed words (AND clauses)
+      if (stemmedWords.length > 0) {
+        const clauses = stemmedWords.map(() => "(LOWER(name) LIKE ? OR LOWER(name) LIKE ?)").join(" AND ");
+        const params: string[] = [];
+        for (const sw of stemmedWords) {
+          params.push(`%${sw}%`, `%${sw}s%`);
+        }
+
+        try {
+          const [andRows]: any = await pool.query(
+            `SELECT id, name FROM customers WHERE ${clauses} LIMIT 50`,
+            params
           );
-          
-          const seenIds = new Set(fuzzyRows.map((r: any) => r.id));
-          for (const row of (orRows || [])) {
+          candidatePool = andRows || [];
+        } catch (err) {
+          console.error("Fuzzy AND query error:", err);
+        }
+
+        // Query B: If less than 5 rows, search with OR clauses for stemmed words
+        if (candidatePool.length < 5) {
+          const orClauses = stemmedWords.map(() => "(LOWER(name) LIKE ? OR LOWER(name) LIKE ?)").join(" OR ");
+          const params: string[] = [];
+          for (const sw of stemmedWords) {
+            params.push(`%${sw}%`, `%${sw}s%`);
+          }
+          try {
+            const [orRows]: any = await pool.query(
+              `SELECT id, name FROM customers WHERE ${orClauses} LIMIT 100`,
+              params
+            );
+
+            const seenIds = new Set(candidatePool.map((r: any) => r.id));
+            for (const row of (orRows || [])) {
+              if (!seenIds.has(row.id)) {
+                candidatePool.push(row);
+                seenIds.add(row.id);
+              }
+            }
+          } catch (err) {
+            console.error("Fuzzy OR query error:", err);
+          }
+        }
+      }
+
+      // Query C: Search customers_locator table by customer_username or customer_name
+      try {
+        const compactTyped = customerNameVal.replace(/[\s\-_]+/g, "").toLowerCase();
+        const [locRows]: any = await pool.query(
+          "SELECT customer_name FROM customers_locator WHERE LOWER(customer_username) LIKE ? OR LOWER(customer_name) LIKE ? LIMIT 10",
+          [`%${compactTyped}%`, `%${stemmedWords[0] || customerNameVal}%`]
+        );
+        if (locRows && locRows.length > 0) {
+          const locNames = locRows.map((r: any) => r.customer_name);
+          const [locCustRows]: any = await pool.query(
+            "SELECT id, name FROM customers WHERE name IN (?)",
+            [locNames]
+          );
+          const seenIds = new Set(candidatePool.map((r: any) => r.id));
+          for (const row of (locCustRows || [])) {
             if (!seenIds.has(row.id)) {
-              fuzzyRows.push(row);
+              candidatePool.push(row);
               seenIds.add(row.id);
             }
           }
         }
-        
-        const scored = (fuzzyRows || []).map((row: any) => {
-          const nameLower = row.name.toLowerCase();
-          let score = 0;
-          let matchedWordsCount = 0;
-          
-          for (const w of words) {
-            const wLower = w.toLowerCase();
-            if (nameLower.includes(wLower)) {
-              matchedWordsCount++;
-              const wordWeight = wLower.length > 2 ? 20 : 5;
-              score += wordWeight;
-              
-              if (nameLower.startsWith(wLower)) score += 10;
-              if (new RegExp(`\\b${wLower}\\b`).test(nameLower)) score += 5;
-            }
-          }
-          
-          if (matchedWordsCount === words.length) {
-            score += 100;
-          }
-          
-          // Penalize all-lowercase names (likely generic/test records like 'fujairah')
-          if (row.name === row.name.toLowerCase()) score -= 50;
-          
-          // Boost names that contain multiple words (proper company names)
-          const wordCount = row.name.trim().split(/\s+/).length;
-          if (wordCount >= 2) score += 10;
-          
-          score -= row.name.length * 0.1;
-          return { row, score };
-        });
-        
-        scored.sort((a: any, b: any) => b.score - a.score);
-        candidates = scored.slice(0, 5).map((x: any) => x.row);
+      } catch (locErr) {
+        console.error("Locator customer search error:", locErr);
       }
 
-      if (candidates.length === 0) {
-        return res.status(400).json({ error: "this user is not exist in db" });
-      } else if (body.confirmFirstCandidate && candidates.length > 0) {
+      // Score candidates
+      const scored = candidatePool.map((row: any) => {
+        const nameLower = row.name.toLowerCase();
+        let score = 0;
+        let matchedCount = 0;
+
+        for (let i = 0; i < words.length; i++) {
+          const wOriginal = words[i].toLowerCase();
+          const wStemmed = stemmedWords[i];
+
+          if (nameLower.includes(wOriginal) || nameLower.includes(wStemmed)) {
+            matchedCount++;
+            score += 50;
+
+            if (nameLower.startsWith(wOriginal) || nameLower.startsWith(wStemmed)) {
+              score += 100;
+            }
+          }
+        }
+
+        // If ALL core non-noise words match (e.g. both 'secret' and 'garden'), HUGE BOOST!
+        if (words.length > 0 && matchedCount === words.length) {
+          score += 500;
+        }
+
+        // Penalize all-lowercase names ('fujairah' junk)
+        if (row.name === row.name.toLowerCase()) {
+          score -= 100;
+        }
+
+        return { row, score };
+      });
+
+      scored.sort((a: any, b: any) => b.score - a.score);
+
+      // Filter candidates with a positive score
+      const validScored = scored.filter((x: any) => x.score > 0);
+      candidates = validScored.slice(0, 5).map((x: any) => x.row);
+
+      // Require confirmation for fuzzy matches unless explicitly confirmed via confirmFirstCandidate
+      if (body.confirmFirstCandidate && candidates.length > 0) {
         customerId = candidates[0].id;
         finalCustomerName = candidates[0].name;
+      } else if (candidates.length === 0) {
+        return res.status(400).json({ error: "this user is not exist in db" });
       } else {
         return res.status(400).json({
           error: "disambiguation_required",
@@ -525,6 +590,7 @@ app.post("/api/services", async (req, res) => {
 
     let contactPersonVal = body.contactPerson || body.contactName || null;
     let contactNumberVal = body.contactNumber || body.phone || null;
+    let customerPhoneVal: string | null = null;
     let emailVal = body.email || null;
     let addressVal = body.address || null;
     let regionVal = body.region || null;
@@ -539,6 +605,7 @@ app.post("/api/services", async (req, res) => {
           [customerId]
         );
         if (custRows && custRows[0]) {
+          customerPhoneVal = custRows[0].phone || null;
           if (!contactPersonVal) contactPersonVal = custRows[0].contact_name;
           if (!contactNumberVal) contactNumberVal = custRows[0].phone;
           if (!emailVal) emailVal = custRows[0].email;
@@ -582,6 +649,7 @@ app.post("/api/services", async (req, res) => {
         customerId,
         customerName: finalCustomerName,
         customerUsername: customerUsernameVal,
+        customerPhone: customerPhoneVal || contactNumberVal,
         contactPerson: contactPersonVal,
         contactNumber: contactNumberVal,
         email: emailVal,
@@ -653,6 +721,12 @@ app.post("/api/services", async (req, res) => {
     if (body.accessories) descVal += `\naccessories: ${body.accessories}`;
     if (body.driverNumber) descVal += `\nDriver Number: ${body.driverNumber}`;
     if (body.preferredDateTime) descVal += `\nPreferred Date/Time: ${body.preferredDateTime}`;
+    if (contactPersonVal || contactNumberVal) {
+      const contactDetail = [contactPersonVal, contactNumberVal].filter(Boolean).join(" - ");
+      if (contactDetail && !descVal.toLowerCase().includes(contactDetail.toLowerCase()) && (!contactNumberVal || !descVal.includes(contactNumberVal))) {
+        descVal += `\nContact: ${contactDetail}`;
+      }
+    }
 
     if (!body.dryRun) {
       await pool.query(
@@ -709,6 +783,7 @@ app.post("/api/services", async (req, res) => {
       ...body,
       id: nextId, 
       customerUsername: customerUsernameVal || "", 
+      customerPhone: customerPhoneVal || contactNumberVal || "",
       contactPerson: contactPersonVal || "",
       contactNumber: contactNumberVal || "",
       email: emailVal || "",
@@ -732,32 +807,93 @@ app.put("/api/services/:id", async (req, res) => {
     const assigneeName = body.assignee || body.salesPerson || body.requestedPerson;
     const L1_assigned_to = assigneeName ? await resolveUserIdByName(assigneeName) : null;
 
+    const [existingRows]: any = await pool.query(
+      "SELECT * FROM tbl_customer_services_beta WHERE customer_service_id = ? LIMIT 1",
+      [id]
+    );
+
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({ error: "Service ticket not found" });
+    }
+
+    const existing = existingRows[0];
+    let descVal = body.description || existing.customer_service_description || "";
+
+    if (body.vehiclePlate) {
+      if (/Vehicle Plate:\s*.*/i.test(descVal)) {
+        descVal = descVal.replace(/Vehicle Plate:\s*.*/i, `Vehicle Plate: ${body.vehiclePlate}`);
+      } else {
+        descVal += `\nVehicle Plate: ${body.vehiclePlate}`;
+      }
+    }
+    if (body.accessories) {
+      if (/accessories:\s*.*/i.test(descVal)) {
+        descVal = descVal.replace(/accessories:\s*.*/i, `accessories: ${body.accessories}`);
+      } else {
+        descVal += `\naccessories: ${body.accessories}`;
+      }
+    }
+    if (body.driverNumber) {
+      if (/Driver Number:\s*.*/i.test(descVal)) {
+        descVal = descVal.replace(/Driver Number:\s*.*/i, `Driver Number: ${body.driverNumber}`);
+      } else {
+        descVal += `\nDriver Number: ${body.driverNumber}`;
+      }
+    }
+    if (body.preferredDateTime) {
+      if (/Preferred Date\/Time:\s*.*/i.test(descVal)) {
+        descVal = descVal.replace(/Preferred Date\/Time:\s*.*/i, `Preferred Date/Time: ${body.preferredDateTime}`);
+      } else {
+        descVal += `\nPreferred Date/Time: ${body.preferredDateTime}`;
+      }
+    }
+    if (body.contactPerson || body.contactNumber) {
+      const cPerson = body.contactPerson || body.contactName;
+      const cNumber = body.contactNumber || body.phone;
+      const contactDetail = [cPerson, cNumber].filter(Boolean).join(" - ");
+      if (contactDetail) {
+        if (/Contact:\s*.*/i.test(descVal)) {
+          descVal = descVal.replace(/Contact:\s*.*/i, `Contact: ${contactDetail}`);
+        } else if (!descVal.toLowerCase().includes(contactDetail.toLowerCase()) && (!cNumber || !descVal.includes(cNumber))) {
+          descVal += `\nContact: ${contactDetail}`;
+        }
+      }
+    }
+
     const queryParts = [];
     const queryParams = [];
 
     if (body.customerName) { queryParts.push("customer_service_customer_name = ?"); queryParams.push(body.customerName); }
-    if (body.description) { queryParts.push("customer_service_description = ?"); queryParams.push(body.description); }
+    if (body.contactPerson || body.contactName) { queryParts.push("customer_service_customer_contact_name = ?"); queryParams.push(body.contactPerson || body.contactName); }
+    if (body.contactNumber || body.phone) { queryParts.push("customer_service_customer_phone = ?"); queryParams.push(body.contactNumber || body.phone); }
+    if (descVal) { queryParts.push("customer_service_description = ?"); queryParams.push(descVal); }
     if (body.status) {
       queryParts.push("customer_service_status = ?");
       queryParams.push(mapLeadStatusToDb(body.status));
     }
-    if (body.quantity !== undefined) {
-      queryParts.push("customer_service_quantity = ?");
-      queryParams.push(body.quantity);
+    if (body.quantity !== undefined && body.quantity !== null) {
+      const parsedQty = parseInt(String(body.quantity));
+      if (!isNaN(parsedQty)) {
+        queryParts.push("customer_service_quantity = ?");
+        queryParams.push(parsedQty);
+      }
     }
     if (body.paymentOption || body.payment) {
       queryParts.push("customer_service_payment = ?");
       queryParams.push((body.paymentOption || body.payment || "applicable").toLowerCase().replace(/\s+/g, "") === "applicable" ? "applicable" : "notapplicable");
     }
-    if (body.amount !== undefined) {
+    if (body.amount !== undefined && body.amount !== null) {
+      const amount = body.amount;
+      const isOld = amount === "same as old" || (typeof amount === "string" && amount.toLowerCase().includes("old"));
+      const parsedAmount = isOld ? null : parseInt(String(amount));
       queryParts.push("customer_service_amount = ?");
-      queryParams.push(parseInt(body.amount || "0"));
+      queryParams.push(isOld || isNaN(parsedAmount) ? null : parsedAmount);
     }
     if (body.paymentStatus) {
       queryParts.push("customer_service_payment_status = ?");
       queryParams.push((body.paymentStatus || "notpaid").toLowerCase().replace(/\s+/g, "") === "paid" ? "paid" : "notpaid");
     }
-    if (L1_assigned_to !== null) {
+    if (L1_assigned_to !== null && L1_assigned_to > 0) {
       queryParts.push("customer_service_L1_assigned_to = ?");
       queryParams.push(L1_assigned_to);
     }
@@ -770,10 +906,95 @@ app.put("/api/services/:id", async (req, res) => {
       );
     }
 
-    return res.json({ success: true });
+    const [updatedRows]: any = await pool.query(
+      "SELECT * FROM tbl_customer_services_beta WHERE customer_service_id = ? LIMIT 1",
+      [id]
+    );
+    const updated = updatedRows[0] || existing;
+
+    let customerUsernameVal = "";
+    let customerPhoneVal = "";
+    try {
+      const [locRows]: any = await pool.query(
+        "SELECT customer_username FROM customers_locator WHERE customer_name = ? LIMIT 1",
+        [updated.customer_service_customer_name]
+      );
+      if (locRows && locRows[0]) {
+        customerUsernameVal = locRows[0].customer_username;
+      }
+    } catch (err) {
+      console.error("Failed to query customer_username:", err);
+    }
+
+    try {
+      const [custRows]: any = await pool.query(
+        "SELECT phone FROM customers WHERE name = ? LIMIT 1",
+        [updated.customer_service_customer_name]
+      );
+      if (custRows && custRows[0]) {
+        customerPhoneVal = custRows[0].phone || "";
+      }
+    } catch (err) {
+      console.error("Failed to query customer phone:", err);
+    }
+
+    const extractedPlate = descVal.match(/Vehicle Plate:\s*(.*)/i)?.[1]?.trim() || body.vehiclePlate || null;
+    const extractedDriver = descVal.match(/Driver Number:\s*(.*)/i)?.[1]?.trim() || body.driverNumber || null;
+    const extractedAccessories = descVal.match(/accessories:\s*(.*)/i)?.[1]?.trim() || body.accessories || null;
+
+    return res.json({
+      success: true,
+      id: updated.customer_service_id,
+      customerName: updated.customer_service_customer_name,
+      customerUsername: customerUsernameVal,
+      customerPhone: customerPhoneVal || updated.customer_service_customer_phone || "",
+      contactPerson: updated.customer_service_customer_contact_name,
+      contactNumber: updated.customer_service_customer_phone,
+      driverNumber: extractedDriver,
+      implementationType: updated.customer_service_customer_type,
+      quantity: updated.customer_service_quantity,
+      vehiclePlate: extractedPlate,
+      region: updated.region,
+      description: descVal,
+      accessories: extractedAccessories,
+      assignee: assigneeName || userIdToNameMap[updated.customer_service_L1_assigned_to] || "",
+      requestedPerson: userIdToNameMap[updated.requested_by] || body.requestedPerson || "admin",
+      amount: (body.amount === "same as old" || (typeof body.amount === "string" && body.amount.toLowerCase().includes("old"))) ? "same as old" : updated.customer_service_amount
+    });
   } catch (err: any) {
     console.error("Update service ticket failed:", err);
     return res.status(500).json({ error: "Failed to update service ticket." });
+  }
+});
+
+// Get latest service ticket record
+app.get("/api/services/latest", async (req, res) => {
+  try {
+    const [rows]: any = await pool.query(
+      "SELECT * FROM tbl_customer_services_beta ORDER BY customer_service_id DESC LIMIT 1"
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: "No service tickets found" });
+    }
+    return res.json(rows[0]);
+  } catch (err: any) {
+    console.error("Get latest service ticket failed:", err);
+    return res.status(500).json({ error: "Failed to fetch latest service ticket." });
+  }
+});
+
+// Delete / Undo Service Ticket
+app.delete("/api/services/:id", async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    await pool.query(
+      "DELETE FROM tbl_customer_services_beta WHERE customer_service_id = ?",
+      [id]
+    );
+    return res.json({ success: true, deletedId: id });
+  } catch (err: any) {
+    console.error("Delete service ticket failed:", err);
+    return res.status(500).json({ error: "Failed to delete service ticket." });
   }
 });
 

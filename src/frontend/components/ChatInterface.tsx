@@ -43,6 +43,7 @@ export const ChatInterface = ({
   const [usersList, setUsersList] = useState<{ id: number; name: string; username: string }[]>([]);
   const [groqConfig, setGroqConfig] = useState<{ apiKey: string; model: string }>({ apiKey: "", model: "llama-3.1-8b-instant" });
   const [pendingTicket, setPendingTicket] = useState<any | null>(null);
+  const [lastCreatedTicket, setLastCreatedTicket] = useState<any | null>(null);
   const [confirmedCustomer, setConfirmedCustomer] = useState<string | null>(null);
 
   const getBaseChatChannel = (target: string) => {
@@ -261,7 +262,7 @@ export const ChatInterface = ({
 CUSTOMER DETAILS
 ━━━━━━━━━━━━━━━━━━━━
 *Customer Name   : ${r.customerName || confirmedCustomer}
-*Contact Person  : ${r.contactPerson || "N/A"}
+${r.customerUsername ? `*Customer Username: ${r.customerUsername}\n` : ""}${r.customerPhone || r.customerNumber ? `*Customer Number : ${r.customerPhone || r.customerNumber}\n` : ""}*Contact Person  : ${r.contactPerson || "N/A"}
 *Contact Number  : ${r.contactNumber || "N/A"}
 *Driver: ${r.driverNumber || "N/A"}
 
@@ -398,7 +399,116 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
       if (jsonMatch) {
         try {
           const parsedJson = JSON.parse(rawJson);
-          if (parsedJson.intent === "create_service_ticket") {
+
+          // Fallback extraction if LLM missed description or customerName
+          if (!parsedJson.description || parsedJson.description === "extracted description or null") {
+            const issueMatch = userMsg.match(/(?:reported\s+issue|issue|problem|service)\s*(?:is|:)?\s*\*?\*?([^*.\n,]+)\*?\*?/i);
+            if (issueMatch && issueMatch[1] && issueMatch[1].trim().length > 2) {
+              parsedJson.description = issueMatch[1].trim();
+            }
+          }
+
+          if (!parsedJson.customerName || parsedJson.customerName === "extracted customer name or null") {
+            const custMatch = userMsg.match(/(?:service\s+request\s+for|ticket\s+for|customer\s*:?)\s*\*?\*?([^*.\n,]+)\*?\*?/i);
+            if (custMatch && custMatch[1] && custMatch[1].trim().length > 2) {
+              parsedJson.customerName = custMatch[1].trim();
+            }
+          }
+
+          // Safeguard: If both required fields exist, force intent to create_service_ticket
+          const hasCust = !!(parsedJson.customerName && parsedJson.customerName !== "extracted customer name or null");
+          const hasDesc = !!(parsedJson.description && parsedJson.description !== "extracted description or null");
+          if (hasCust && hasDesc && parsedJson.intent === "missing_information") {
+            parsedJson.intent = "create_service_ticket";
+          }
+
+          const userTextLower = userMsg.toLowerCase();
+          const isExplicitNewTicket = userTextLower.includes("new ticket") || userTextLower.includes("another ticket") || userTextLower.includes("create new") || userTextLower.includes("start over");
+          const parsedCust = (parsedJson.customerName || "").trim().toLowerCase();
+          const lastCust = (lastCreatedTicket?.customerName || "").trim().toLowerCase();
+          const isDifferentCustomer = !!(parsedCust && lastCust && !parsedCust.includes(lastCust) && !lastCust.includes(parsedCust));
+
+          const isUpdatingLastCreated = !!(
+            lastCreatedTicket &&
+            !isExplicitNewTicket &&
+            !isDifferentCustomer &&
+            (
+              parsedJson.intent === "update_service_ticket" ||
+              (
+                parsedJson.intent !== "create_service_ticket" &&
+                (
+                  userTextLower.includes("update") ||
+                  userTextLower.includes("change") ||
+                  userTextLower.includes("correct") ||
+                  userTextLower.includes("forgot") ||
+                  userTextLower.includes("forget")
+                )
+              )
+            )
+          );
+
+          if (isUpdatingLastCreated && lastCreatedTicket) {
+            const updateResponse = await fetch(`/api/services/${lastCreatedTicket.id}`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${currentUser?.token || ""}`
+              },
+              body: JSON.stringify({
+                customerName: parsedJson.customerName || lastCreatedTicket.customerName,
+                contactPerson: parsedJson.contactPerson || lastCreatedTicket.contactPerson,
+                contactNumber: parsedJson.contactNumber || lastCreatedTicket.contactNumber,
+                description: parsedJson.description || lastCreatedTicket.description,
+                quantity: parsedJson.quantity !== undefined ? parsedJson.quantity : lastCreatedTicket.quantity,
+                amount: parsedJson.amount !== undefined ? parsedJson.amount : lastCreatedTicket.amount,
+                payment: parsedJson.payment || lastCreatedTicket.payment,
+                assignee: parsedJson.assignee || lastCreatedTicket.assignee,
+                salesPerson: parsedJson.assignee || lastCreatedTicket.assignee,
+                requestedPerson: parsedJson.requestedPerson || lastCreatedTicket.requestedPerson,
+                region: parsedJson.region || lastCreatedTicket.region,
+                implementationType: parsedJson.implementationType || lastCreatedTicket.implementationType,
+                vehiclePlate: parsedJson.vehiclePlate || null,
+                accessories: parsedJson.accessories || null,
+                driverNumber: parsedJson.driverNumber || null,
+                preferredDateTime: parsedJson.preferredDateTime || null
+              })
+            });
+
+            if (!updateResponse.ok) {
+              const updateErr = await updateResponse.json();
+              throw new Error(updateErr.error || "Failed to update service ticket in database.");
+            }
+
+            const updateResult = await updateResponse.json();
+            setLastCreatedTicket(updateResult);
+            reply = `🔹SERVICE REQUEST UPDATED (Ticket #${updateResult.id})
+
+━━━━━━━━━━━━━━━━━━━━
+CUSTOMER DETAILS
+━━━━━━━━━━━━━━━━━━━━
+*Customer Name   : ${updateResult.customerName || "N/A"}
+${updateResult.customerUsername ? `*Customer Username: ${updateResult.customerUsername}\n` : ""}${updateResult.customerPhone || updateResult.customerNumber ? `*Customer Number : ${updateResult.customerPhone || updateResult.customerNumber}\n` : ""}*Contact Person  : ${updateResult.contactPerson || "N/A"}
+*Contact Number  : ${updateResult.contactNumber || "N/A"}
+*Driver: ${updateResult.driverNumber || "N/A"}
+
+━━━━━━━━━━━━━━━━━━━━
+SERVICE DETAILS
+━━━━━━━━━━━━━━━━━━━━
+*Implementation Type     : ${updateResult.implementationType || "N/A"}
+*Device Quantity: ${updateResult.quantity || 1}
+*Vehicle Plate : ${updateResult.vehiclePlate || "N/A"}
+*Installation Location : ${updateResult.region || "N/A"}
+*Description : ${updateResult.description || "N/A"}
+*accessories : ${updateResult.accessories || "N/A"}
+*Sales person : ${updateResult.assignee || ""}
+*Requested By    : ${updateResult.requestedPerson || currentUser?.name || "admin"}
+
+━━━━━━━━━━━━━━━━━━━━
+PAYMENT DETAILS
+━━━━━━━━━━━━━━━━━━━━
+Amount          : ${updateResult.amount || ""}`;
+            savedRecord = { type: "service", customerName: updateResult.customerName };
+          } else if (parsedJson.intent === "create_service_ticket" || parsedJson.intent === "update_service_ticket") {
              const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
              const isDisambiguationActive = !!(lastAssistantMessage && lastAssistantMessage.content.includes("Please clarify"));
 
@@ -426,7 +536,7 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
                 driverNumber: parsedJson.driverNumber || null,
                 preferredDateTime: parsedJson.preferredDateTime || null,
                 confirmFirstCandidate: isDisambiguationActive,
-                dryRun: true
+                dryRun: false
               })
             });
 
@@ -446,31 +556,15 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
             }
 
             const insertResult = await insertResponse.json();
-            setPendingTicket({
-              customerName: insertResult.customerName,
-              description: insertResult.description,
-              quantity: insertResult.quantity,
-              amount: insertResult.amount,
-              payment: insertResult.payment,
-              assignee: insertResult.assignee,
-              requestedPerson: insertResult.requestedPerson,
-              region: insertResult.region,
-              implementationType: insertResult.implementationType,
-              link: insertResult.link,
-              contactPerson: insertResult.contactPerson,
-              contactNumber: insertResult.contactNumber,
-              vehiclePlate: insertResult.vehiclePlate,
-              accessories: insertResult.accessories,
-              driverNumber: insertResult.driverNumber,
-              preferredDateTime: insertResult.preferredDateTime
-            });
-            reply = `🔹SERVICE REQUEST DRAFT (Pending Confirmation)
+            setLastCreatedTicket(insertResult);
+            setPendingTicket(null);
+            reply = `🔹SERVICE REQUEST (Created Successfully)
 
 ━━━━━━━━━━━━━━━━━━━━
 CUSTOMER DETAILS
 ━━━━━━━━━━━━━━━━━━━━
 *Customer Name   : ${insertResult.customerName || "N/A"}
-${insertResult.customerUsername ? `*Customer Username: ${insertResult.customerUsername}\n` : ""}*Contact Person  : ${insertResult.contactPerson || "N/A"}
+${insertResult.customerUsername ? `*Customer Username: ${insertResult.customerUsername}\n` : ""}${insertResult.customerPhone || insertResult.customerNumber ? `*Customer Number : ${insertResult.customerPhone || insertResult.customerNumber}\n` : ""}*Contact Person  : ${insertResult.contactPerson || "N/A"}
 *Contact Number  : ${insertResult.contactNumber || "N/A"}
 *Driver: ${insertResult.driverNumber || "N/A"}
 
@@ -491,22 +585,30 @@ PAYMENT DETAILS
 ━━━━━━━━━━━━━━━━━━━━
 Amount          : ${insertResult.amount || ""}
 
-Please confirm if these details are correct by replying "Confirm" / "Yes" or clicking the confirm button below.`;
-            savedRecord = null;
-            setConfirmedCustomer(null); // clear confirmed customer after ticket is drafted
+✅ Service Ticket #${insertResult.id || ""} created. Click "Undo / Cancel Ticket" below if you wish to revert.`;
+            savedRecord = { type: "service", customerName: insertResult.customerName };
+            setConfirmedCustomer(null); // clear confirmed customer after ticket is created
           } else if (parsedJson.intent === "missing_information") {
-            let missingFields = Array.isArray(parsedJson.missingFields) ? [...parsedJson.missingFields] : ["customerName", "description"];
+            let missingFields = (Array.isArray(parsedJson.missingFields) ? [...parsedJson.missingFields] : ["customerName", "description"])
+              .filter((f: string) => f === "customerName" || f === "description");
             
             const effectiveCustomerName = (parsedJson.customerName && parsedJson.customerName !== "extracted customer name or null") 
               ? parsedJson.customerName 
               : (confirmedCustomer || "");
 
-            // If we have a confirmed customer but LLM erroneously lists customerName as missing, remove it
-            if (effectiveCustomerName && confirmedCustomer && missingFields.includes("customerName")) {
+            const effectiveDescription = (parsedJson.description && parsedJson.description !== "extracted description or null")
+              ? parsedJson.description
+              : "";
+
+            // If we have a confirmed customer or extracted customer but LLM erroneously lists customerName as missing, remove it
+            if (effectiveCustomerName && missingFields.includes("customerName")) {
               missingFields = missingFields.filter(f => f !== "customerName");
             }
+            if (effectiveDescription && missingFields.includes("description")) {
+              missingFields = missingFields.filter(f => f !== "description");
+            }
 
-            const missing = missingFields.join(", ") || "description";
+            const missing = missingFields.length > 0 ? missingFields.join(", ") : "description";
 
             if (effectiveCustomerName) {
               const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
@@ -564,7 +666,7 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
               // Customer was confirmed earlier, only description is missing - that's fine
             }
 
-            reply = `I need some more information to create the ticket. Please specify: **${missing}**.`;
+            reply = `⚠️ Ticket Not Created (Pending Information)\n\nI need some more information to create the ticket. Please specify: **${missing}**.`;
           }
         } catch (jsonErr: any) {
           console.error("JSON parsing/creation failed:", jsonErr);
@@ -637,7 +739,7 @@ Please confirm if these details are correct by replying "Confirm" / "Yes" or cli
 CUSTOMER DETAILS
 ━━━━━━━━━━━━━━━━━━━━
 *Customer Name   : ${insertResult.customerName || "N/A"}
-${insertResult.customerUsername ? `*Customer Username: ${insertResult.customerUsername}\n` : ""}*Contact Person  : ${insertResult.contactPerson || "N/A"}
+${insertResult.customerUsername ? `*Customer Username: ${insertResult.customerUsername}\n` : ""}${insertResult.customerPhone || insertResult.customerNumber ? `*Customer Number : ${insertResult.customerPhone || insertResult.customerNumber}\n` : ""}*Contact Person  : ${insertResult.contactPerson || "N/A"}
 *Contact Number  : ${insertResult.contactNumber || "N/A"}
 *Driver: ${insertResult.driverNumber || "N/A"}
 
@@ -664,6 +766,7 @@ Amount          : ${insertResult.amount || ""}`;
       setMessages(finalMessages);
       localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMessages));
       setPendingTicket(null);
+      setLastCreatedTicket(insertResult);
 
       if (onRecordSaved) {
         onRecordSaved({
@@ -692,6 +795,40 @@ Amount          : ${insertResult.amount || ""}`;
     handleConfirmPendingTicket(pendingTicket, updatedUserMessages, chatScopeKey, messageChannel);
   };
 
+  const handleUndoLastTicket = async () => {
+    if (!lastCreatedTicket || loading) return;
+    const ticketId = lastCreatedTicket.id;
+    const customerName = lastCreatedTicket.customerName;
+    const messageChannel = getModeChatChannel(aiMode, selectedChatTarget);
+    const mockUserMsg: Message = { role: "user" as const, content: "Undo / Cancel Ticket", username: messageChannel, timestamp: new Date().toISOString() };
+    const updatedUserMessages = [...messages, mockUserMsg];
+    setMessages(updatedUserMessages);
+    setLoading(true);
+
+    try {
+      const res = await fetch(`/api/services/${ticketId}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${currentUser?.token || ""}` }
+      });
+      let reply = "";
+      if (res.ok) {
+        reply = `⚠️ Service Ticket #${ticketId} for **${customerName}** has been undone and removed from the database.`;
+        setLastCreatedTicket(null);
+      } else {
+        reply = `Failed to undo ticket #${ticketId}.`;
+      }
+      const sendScopeKey = chatScopeKey;
+      if (activeChatScopeRef.current !== sendScopeKey) return;
+      const finalMsgs: Message[] = [...updatedUserMessages, { role: "assistant" as const, content: reply, username: messageChannel, timestamp: new Date().toISOString() }];
+      setMessages(finalMsgs);
+      localStorage.setItem(`synohub-chat-hist-${chatScopeKey}`, JSON.stringify(finalMsgs));
+    } catch (e: any) {
+      console.error("Undo ticket failed:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <ChatPage
       currentUser={currentUser ?? null}
@@ -716,6 +853,8 @@ Amount          : ${insertResult.amount || ""}`;
       usersList={usersList}
       pendingTicket={pendingTicket}
       onConfirmPendingTicket={handleConfirmPendingTicketBtn}
+      lastCreatedTicket={lastCreatedTicket}
+      onUndoLastTicket={handleUndoLastTicket}
     />
   );
 };

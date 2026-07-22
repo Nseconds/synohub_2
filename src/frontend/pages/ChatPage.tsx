@@ -1,5 +1,5 @@
 import React from "react";
-import { Eye, MessageSquare, Send, Sparkles, Zap } from "lucide-react";
+import { Eye, MessageSquare, RotateCcw, Send, Sparkles, Zap } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "../../lib/utils";
 
@@ -40,6 +40,8 @@ interface ChatPageProps {
   usersList?: { id: number; name: string; username: string }[];
   pendingTicket?: any | null;
   onConfirmPendingTicket?: () => void;
+  lastCreatedTicket?: any | null;
+  onUndoLastTicket?: () => void;
 }
 
 const getChatTargetLabel = (target: string) => {
@@ -66,7 +68,9 @@ export const ChatPage = ({
   onSend,
   usersList = [],
   pendingTicket = null,
-  onConfirmPendingTicket
+  onConfirmPendingTicket,
+  lastCreatedTicket = null,
+  onUndoLastTicket
 }: ChatPageProps) => (
   <div className="max-w-4xl mx-auto px-4">
     <div className="flex flex-col h-[700px] border border-zinc-200 rounded-2xl overflow-hidden bg-white shadow-lg">
@@ -192,6 +196,21 @@ export const ChatPage = ({
             className="bg-[#00ADC6] text-white rounded px-4.5 py-2 font-bold hover:bg-[#047E8F] transition-all cursor-pointer shadow-sm text-xs"
           >
             Confirm and Create Ticket
+          </button>
+        </div>
+      )}
+
+      {lastCreatedTicket && !pendingTicket && (
+        <div className="px-6 py-2.5 bg-zinc-50 border-t border-b border-zinc-200 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 font-medium text-zinc-700">
+            <span>Service Ticket #{lastCreatedTicket.id} active for <strong>{lastCreatedTicket.customerName}</strong></span>
+          </div>
+          <button
+            onClick={onUndoLastTicket}
+            className="bg-red-50 text-red-600 border border-red-200 rounded px-3.5 py-1.5 font-bold hover:bg-red-100 transition-all cursor-pointer text-xs flex items-center gap-1.5"
+          >
+            <RotateCcw size={13} />
+            Undo / Cancel Ticket
           </button>
         </div>
       )}
